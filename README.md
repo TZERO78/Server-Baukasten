@@ -6,37 +6,28 @@
 
 ## ✨ Features
 
-### 🛡️ **Multi-Layer-Security**
+### 👻 **Unsichtbarer & Sicherer Zugang (Zero Trust)**
+- **Tailscale VPN-Integration:** Macht den Server im öffentlichen Netz praktisch unsichtbar.
+- **Keine offenen Ports:** Standardmäßig werden keine Dienste dem Internet ausgesetzt.
+- **Reduzierte Angriffsfläche:** Die meisten Angriffe werden von vornherein unmöglich gemacht.
+- **SSH-Härtung:** Zusätzlicher Schutz für den (Notfall-)Zugang.
+
+### 🛡️ **Multi-Layer-Security (Falls Dienste doch erreichbar sein müssen)**
 - **NFTables Firewall** mit Default-Drop-Policy
 - **CrowdSec IPS** mit kollektiver Threat Intelligence
-- **GeoIP-Blocking** (21.590+ blockierte IPs aus Risiko-Ländern)
-- **SSH-Härtung** mit Key-basierter Authentifizierung
+- **GeoIP-Blocking** zur Abwehr von Angriffen aus Risiko-Ländern
 - **AppArmor** Mandatory Access Control
 
-### 🌍 **Intelligente Bedrohungsabwehr**
-- **Automatisches Geo-Blocking** basierend auf Locale
-- **Heimatland-Schutz** (wird niemals blockiert)
-- **Tägliche IP-Listen-Updates** (vollautomatisch)
-- **Zero-Maintenance** GeoIP-System
-
-### 📊 **Proaktives Monitoring**
-- **AIDE** File Integrity Monitoring
-- **RKHunter** Rootkit Detection
-- **Strukturierte Logs** via journald
-- **E-Mail-Benachrichtigungen** bei Security-Events
-
-### 🐳 **Modern Container Stack** (optional)
+### 🐳 **Moderner Container Stack (optional)**
 - **Docker** mit gehärteter Konfiguration
 - **Portainer** Web-Management-Interface
 - **Watchtower** automatische Container-Updates
-- **Tailscale VPN** für sicheren Zugang
 
-### ⚡ **Vollautomatische Wartung**
-- **Automatische Security-Updates** via systemd-Timer
+### 📊 **Proaktives Monitoring & Wartung**
+- **AIDE** File Integrity Monitoring & **RKHunter** Rootkit Detection
+- **Strukturierte Logs** via journald & automatische Security-Updates
 - **Tägliche System-Backups** mit Rotation
-- **Health-Checks** alle 5 Minuten
-- **Self-Healing** Services
-
+ 
 ## 🚀 Quick Start
 
 ### Voraussetzungen
