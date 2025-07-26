@@ -8,9 +8,9 @@
 #        extrem sicheren und modernen Standard ein.
 #
 # USAGE:
-#   Interaktiv: sudo ./setup.sh
-#   Automatisch: sudo ./setup.sh -c /pfad/zur/config.conf
-#   Hilfe:      sudo ./setup.sh -h
+#   Interaktiv: sudo ./serverbaukasten.sh
+#   Automatisch: sudo ./serverbaukasten.sh -c /pfad/zur/config.conf
+#   Hilfe:      sudo ./serverbaukasten.sh -h
 ################################################################################
 
 # --- Sicherheits-Präambel ---
