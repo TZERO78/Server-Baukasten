@@ -3,6 +3,8 @@
 **Vollautomatische Linux-Server-Härtung**
 
 > 🚀 **Ein Skript, um einen neuen Linux-Server in 20 Minuten in eine uneinnehmbare Festung zu verwandeln.**
+>
+> Das Hauptziel ist ein **von außen unsichtbarer Server**, der ausschließlich über ein sicheres VPN (Tailscale) erreichbar ist. Dadurch wird die Angriffsfläche gegen Null reduziert, noch bevor die Firewall überhaupt greift.
 
 ## ✨ Features
 
@@ -25,239 +27,115 @@
 
 ### 📊 **Proaktives Monitoring & Wartung**
 - **AIDE** File Integrity Monitoring & **RKHunter** Rootkit Detection
-- **Strukturierte Logs** via journald & automatische Security-Updates
+- **Strukturierte Logs** via `journald` & automatische Security-Updates
 - **Tägliche System-Backups** mit Rotation
- 
+
 ## 🚀 Quick Start
 
-### Voraussetzungen
-- Debian 12 (Bookworm) - frische Installation
-- Root-Zugang via SSH
-- Mindestens 1GB RAM (empfohlen: 2GB+)
-- Tailscale-Account (kostenlos) für VPN-Zugang
+Es gibt zwei Wege, das Skript zu nutzen: den empfohlenen automatischen Weg oder den interaktiven Modus.
 
-### Installation
+### Empfohlener Weg (Automatisch via Konfigurationsdatei)
+
+Dieser Weg ist ideal für wiederholbare Setups und die beste Methode.
 
 ```bash
-# 1. Script herunterladen
-wget https://raw.githubusercontent.com/TZERO78/Server-Baukasten/main/serverbaukasten.sh
+# 1. Skript und Standard-Konfiguration herunterladen
+wget [https://raw.githubusercontent.com/TZERO78/Server-Baukasten/main/serverbaukasten.sh](https://raw.githubusercontent.com/TZERO78/Server-Baukasten/main/serverbaukasten.sh)
+wget [https://raw.githubusercontent.com/TZERO78/Server-Baukasten/main/standard.conf](https://raw.githubusercontent.com/TZERO78/Server-Baukasten/main/standard.conf)
 chmod +x serverbaukasten.sh
 
-# 2. Interaktiver Modus (empfohlen für erste Installation)
-sudo ./serverbaukasten.sh
+# 2. Konfiguration anpassen
+# Kopiere die Vorlage und trage DEINE Werte ein (Passwörter, E-Mail etc.)
+cp standard.conf mein-server.conf
+nano mein-server.conf
 
-# 3. Oder mit Konfigurationsdatei (für Automation)
-sudo ./serverbaukasten.sh -c production-server.conf
+# 3. Skript mit deiner Konfiguration ausführen
+sudo ./serverbaukasten.sh -c mein-server.conf
+```
+
+### Alternativer Weg (Interaktiv)
+
+Gut für die erste Einrichtung, wenn du dich durch die Optionen führen lassen möchtest.
+
+```bash
+# 1. Nur das Skript herunterladen
+wget [https://raw.githubusercontent.com/TZERO78/Server-Baukasten/main/serverbaukasten.sh](https://raw.githubusercontent.com/TZERO78/Server-Baukasten/main/serverbaukasten.sh)
+chmod +x serverbaukasten.sh
+
+# 2. Skript starten und den Fragen folgen
+sudo ./serverbaukasten.sh
+```
+
+## 🔐 Final Lockdown: Wichtigste Schritte nach der Installation
+
+Das Skript hat die Festung gebaut, aber du schließt die Tore ab. Führe diese Schritte in der angegebenen Reihenfolge aus, um die maximale Sicherheit zu gewährleisten.
+
+**1. SSH-Zugang testen (KRITISCH!)**
+Öffne ein **neues** Terminal (schließe das alte noch nicht!) und stelle sicher, dass du dich mit dem neuen Port und deinem Admin-Benutzer anmelden kannst.
+```bash
+ssh -p [DEIN_SSH_PORT] [DEIN_ADMIN_USER]@[SERVER_IP]
+```
+
+**2. SSH-Sicherheit maximieren (Public-Key-Verfahren)**
+Falls du während des Setups keinen SSH-Schlüssel hinterlegt hast, solltest du es jetzt tun.
+- Füge deinen öffentlichen SSH-Schlüssel zur Datei `~/.ssh/authorized_keys` hinzu.
+- Bearbeite die SSH-Konfiguration: `sudo nano /etc/ssh/sshd_config`.
+- Setze die Option `PasswordAuthentication no`.
+- Starte den SSH-Dienst neu: `sudo systemctl restart ssh`.
+
+**3. Root-Konto sperren**
+Nachdem du den `sudo`-Zugang für deinen Admin-Benutzer getestet hast, sperre den direkten Login für den `root`-Benutzer. Dies ist ein wichtiger Härtungsschritt.
+```bash
+sudo passwd -l root
+```
+
+**4. System neustarten**
+Ein abschließender Neustart stellt sicher, dass alle Dienste korrekt starten und die Konfigurationen geladen werden.
+```bash
+sudo reboot
 ```
 
 ## 🎯 Design-Philosophie
 
 **Einfachheit durch Ein-Datei-Ansatz:**
-
 Dieses Skript wurde bewusst als eine einzige, in sich geschlossene Datei konzipiert. Anstatt viele einzelne Konfigurations- und Skriptdateien verwalten zu müssen, lädst du einfach nur die `serverbaukasten.sh` auf deinen neuen Server, machst sie ausführbar und startest sie. Das macht den gesamten Prozess – besonders für Einsteiger – extrem einfach und nachvollziehbar.
 
-**Deutsche Benutzerführung:**
+**🛡️ Integriertes Sicherheitsnetz:**
+Bei einem unerwarteten Fehler während der Installation bricht das Skript nicht einfach ab, sondern führt automatisch ein Rollback durch, um die ursprünglichen Konfigurationsdateien wiederherzustellen.
 
-Alle Ausgaben, Prompts und Hilfetexte sind bewusst in deutscher Sprache gehalten. Das macht die Server-Härtung für deutschsprachige Administratoren deutlich zugänglicher und verständlicher - keine kryptischen englischen Fehlermeldungen oder unklaren Abfragen mehr.
+## 🔧 System-Management nach dem Setup
 
-**Vorteile des Designs:**
-- 🔥 **Ein Download, sofort einsatzbereit**
-- 🛡️ **Keine versteckten Dependencies** 
-- 📋 **Vollständig portable** (USB-Stick, Copy-Paste)
-- 🔍 **Transparent** (gesamte Logik in einer Datei)
-- 🎯 **Einsteiger-freundlich** (kein Dateien-Wirrwarr)
-- 🇩🇪 **Deutsche Sprache** (verständliche Prompts und Meldungen)
+Hier sind die wichtigsten Befehle, um den Zustand deines neuen Servers zu überprüfen.
 
-### Nach der Installation
-
+### Services & Timer
 ```bash
-# Kritische Services prüfen
-sudo systemctl status ssh nftables crowdsec
+# Status der kritischen Dienste prüfen
+sudo systemctl status ssh nftables crowdsec docker
 
-# Alle automatischen Timer anzeigen
+# Alle automatischen Timer anzeigen (Updates, Backups, Scans)
 sudo systemctl list-timers
-
-# GeoIP-Status anzeigen  
-sudo geoip-manager status
-
-# Live-Logs verfolgen
-sudo journalctl -t server-baukasten -f
 ```
 
-## 📋 Konfigurationsoptionen
-
-### Basis-Konfiguration
-| Option | Standard | Beschreibung |
-|--------|----------|--------------|
-| `SERVER_HOSTNAME` | `$(hostname)` | Hostname des Servers |
-| `SSH_PORT` | `22` | SSH-Port (empfohlen: ändern!) |
-| `ADMIN_USER` | `admin` | Admin-Benutzername |
-| `TIMEZONE` | `Europe/Berlin` | System-Zeitzone |
-
-### Sicherheits-Features
-| Option | Standard | Beschreibung |
-|--------|----------|--------------|
-| `ENABLE_GEOIP_BLOCKING` | `ja` | Länder-basiertes IP-Blocking |
-| `BLOCKED_COUNTRIES` | `CN RU KP IR` | ISO-Ländercodes für Blocking |
-| `CROWDSEC_BANTIME` | `48h` | Sperrdauer für erkannte Angreifer |
-
-### Container-Setup (Server-Rolle: Docker)
-| Option | Standard | Beschreibung |
-|--------|----------|--------------|
-| `INSTALL_PORTAINER` | `ja` | Docker Web-Management |
-| `INSTALL_WATCHTOWER` | `ja` | Automatische Container-Updates |
-| `DOCKER_IPV4_CIDR` | `172.20.0.0/16` | Docker-Netzwerk IPv4 |
-
-## 🛡️ Sicherheits-Architektur
-
-```
-Internet Traffic
-       ↓
-🌍 GeoIP-Filter (Layer 1)
-       ↓  
-🛡️ CrowdSec IPS (Layer 2)
-       ↓
-🔥 NFTables Firewall (Layer 3)
-       ↓
-🔒 AppArmor MAC (Layer 4)
-       ↓
-📊 AIDE Monitoring (Layer 5)
-       ↓
-🏠 Protected Services
-```
-
-## 📊 Nach dem Setup
-
-### Service-Verifikation
-```bash
-sudo ./verify-services.sh
-```
-
-## 📊 System-Status prüfen
-
-### Service-Status verwalten
-```bash
-# Kritische Services prüfen
-sudo systemctl status ssh nftables crowdsec apparmor
-
-# Docker-Services (falls installiert)
-sudo systemctl status docker containerd
-
-# Alle Services auf einen Blick
-sudo systemctl --failed
-```
-
-### Automatische Wartung überwachen
-```bash
-# Alle Timer anzeigen (Updates, Backups, Security-Scans)
-sudo systemctl list-timers
-
-# Spezifische Timer prüfen
-sudo systemctl list-timers aide-check.timer
-sudo systemctl list-timers geoip-update.timer
-sudo systemctl list-timers system-backup.timer
-```
-
-### Firewall & Security-Status
+### Firewall & Security
 ```bash
 # Firewall-Regeln anzeigen
-sudo nft list ruleset | head -20
+sudo nft list ruleset
 
-# GeoIP-Blocking-Status  
+# GeoIP-Blocking-Status
 sudo geoip-manager status
 
 # CrowdSec-Statistiken
 sudo cscli metrics
-
-# Container-Status (falls Docker installiert)
-sudo docker ps -a
 ```
 
-## 🔧 Erweiterte Nutzung
-
-### Backup-System
-Das Script richtet automatisch tägliche Backups ein:
+### Logs
 ```bash
-# Manuelles Backup
-sudo /usr/local/bin/system-backup
+# Live-Logs des Baukasten-Skripts verfolgen
+sudo journalctl -t server-baukasten -f
 
-# Backup-Status prüfen
-sudo systemctl list-timers system-backup.timer
-```
-
-### Log-Monitoring
-```bash
-# Live-Logs aller Services
-sudo journalctl -f
-
-# Nur Security-Events
-sudo journalctl -t server-baukasten -t crowdsec
-
-# AIDE Integrity-Checks
-sudo journalctl -u aide-check.service
-```
-
-## 🧪 Testing & Verifikation
-
-### Automatische Tests
-```bash
-# Basis-Funktionalität testen
-sudo systemctl status ssh nftables crowdsec
-sudo systemctl list-timers --all
-
-# GeoIP-System testen  
-sudo geoip-manager status
-
-# Logs auf Fehler prüfen
+# Alle Security-Logs der letzten Stunde auf Fehler prüfen
 sudo journalctl --since "1 hour ago" --priority=err
 ```
-
-### Manuelle System-Verifikation
-```bash
-# 1. SSH-Zugang testen (KRITISCH!)
-ssh -p [SSH_PORT] [ADMIN_USER]@[SERVER_IP]
-
-# 2. Service-Status prüfen
-sudo systemctl status ssh nftables crowdsec
-
-# 3. Firewall-Regeln anzeigen
-sudo nft list ruleset | head -20
-
-# 4. Container-Status (falls Docker)
-sudo docker ps -a
-
-# 5. Automatische Timer prüfen
-sudo systemctl list-timers
-```
-
-## 🤝 Beitragen
-
-Contributions sind willkommen! 
-
-1. Fork das Repository
-2. Feature-Branch erstellen (`git checkout -b feature/awesome-feature`)
-3. Änderungen committen (`git commit -m 'Add awesome feature'`)
-4. Branch pushen (`git push origin feature/awesome-feature`)
-5. Pull Request erstellen
-
-### Entwicklung
-```bash
-# Script mit Verbose-Modus testen
-sudo ./serverbaukasten.sh -v
-
-# Debug-Modus für detaillierte Ausgaben
-sudo ./serverbaukasten.sh -d
-
-# Test-Modus (überspringt langsame Operationen)
-sudo ./serverbaukasten.sh -t
-```
-
-## ⚠️ Wichtige Hinweise
-
-- **SSH-Zugang testen** bevor Terminal schließen!
-- **Backup wichtiger Daten** vor der Ausführung
-- **Root-Passwort sperren** nach erfolgreicher Einrichtung: `sudo passwd -l root`
-- **Firewall-Regeln prüfen** nach dem ersten Login
 
 ## 📄 Lizenz
 
@@ -276,6 +154,7 @@ Besonderer Dank für die Inspiration und die vielen Denkanstöße, die zu diesem
 * [**Christian's ion.it / Apfelcast**](https://www.youtube.com/@ionit-itservice)
 * [**ct3003**](https://www.youtube.com/@ct3003)
 * [**Raspberry Pi Cloud**](https://www.youtube.com/@RaspberryPiCloud)
-* [**Geek Freaks**](https://www.youtube.com/@TheGeekFreaks)
+* [**Geek Freaks**](https://www.google.com/search?q=https://www.youtube.com/%40ionit-itservice)
 
+---
 ⭐ **Star dieses Repository wenn es dir geholfen hat!** ⭐
