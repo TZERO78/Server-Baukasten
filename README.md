@@ -1,6 +1,6 @@
 # 🏗️ Server-Baukasten
 
-**Vollautomatische Linux-Server-Härtung auf Enterprise-Level**
+**Vollautomatische Linux-Server-Härtung**
 
 > 🚀 **Ein Skript, um einen neuen Linux-Server in 20 Minuten in eine uneinnehmbare Festung zu verwandeln.**
 
