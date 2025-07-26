@@ -49,15 +49,33 @@
 
 ```bash
 # 1. Script herunterladen
-wget https://raw.githubusercontent.com/username/server-baukasten/main/init_server.sh
-chmod +x init_server.sh
+wget https://raw.githubusercontent.com/TZERO78/Server-Baukasten/main/serverbaukasten.sh
+chmod +x serverbaukasten.sh
 
 # 2. Interaktiver Modus (empfohlen für erste Installation)
-sudo ./init_server.sh
+sudo ./serverbaukasten.sh
 
 # 3. Oder mit Konfigurationsdatei (für Automation)
-sudo ./init_server.sh -c production-server.conf
+sudo ./serverbaukasten.sh -c production-server.conf
 ```
+
+## 🎯 Design-Philosophie
+
+**Einfachheit durch Ein-Datei-Ansatz:**
+
+Dieses Skript wurde bewusst als eine einzige, in sich geschlossene Datei konzipiert. Anstatt viele einzelne Konfigurations- und Skriptdateien verwalten zu müssen, lädst du einfach nur die `serverbaukasten.sh` auf deinen neuen Server, machst sie ausführbar und startest sie. Das macht den gesamten Prozess – besonders für Einsteiger – extrem einfach und nachvollziehbar.
+
+**Deutsche Benutzerführung:**
+
+Alle Ausgaben, Prompts und Hilfetexte sind bewusst in deutscher Sprache gehalten. Das macht die Server-Härtung für deutschsprachige Administratoren deutlich zugänglicher und verständlicher - keine kryptischen englischen Fehlermeldungen oder unklaren Abfragen mehr.
+
+**Vorteile des Designs:**
+- 🔥 **Ein Download, sofort einsatzbereit**
+- 🛡️ **Keine versteckten Dependencies** 
+- 📋 **Vollständig portable** (USB-Stick, Copy-Paste)
+- 🔍 **Transparent** (gesamte Logik in einer Datei)
+- 🎯 **Einsteiger-freundlich** (kein Dateien-Wirrwarr)
+- 🇩🇪 **Deutsche Sprache** (verständliche Prompts und Meldungen)
 
 ### Nach der Installation
 
@@ -221,13 +239,6 @@ sudo docker ps -a
 sudo systemctl list-timers
 ```
 
-## 📚 Dokumentation
-
-- [📋 Installation Guide](docs/installation.md)
-- [⚙️ Konfiguration](docs/configuration.md)  
-- [🔧 Troubleshooting](docs/troubleshooting.md)
-- [🛡️ Security Features](docs/security-features.md)
-
 ## 🤝 Beitragen
 
 Contributions sind willkommen! 
@@ -241,13 +252,13 @@ Contributions sind willkommen!
 ### Entwicklung
 ```bash
 # Script mit Verbose-Modus testen
-sudo ./init_server.sh -v
+sudo ./serverbaukasten.sh -v
 
 # Debug-Modus für detaillierte Ausgaben
-sudo ./init_server.sh -d
+sudo ./serverbaukasten.sh -d
 
 # Test-Modus (überspringt langsame Operationen)
-sudo ./init_server.sh -t
+sudo ./serverbaukasten.sh -t
 ```
 
 ## ⚠️ Wichtige Hinweise
@@ -267,6 +278,15 @@ Dieses Projekt steht unter der MIT-Lizenz - siehe [LICENSE](LICENSE) für Detail
 - [IPDeny](https://www.ipdeny.com/) für GeoIP-Datenbanken
 - Der Linux-Community für unzählige Best Practices
 
+Besonderer Dank für die Inspiration und die vielen Denkanstöße, die zu diesem Projekt geführt haben, gilt den YouTube-Kanälen:
+
+Christian's ion.it / Apfelcast
+
+ct3003
+
+Raspberry Pi Cloud
+
+The Geek Freaks
 ---
 
 ⭐ **Star dieses Repository wenn es dir geholfen hat!** ⭐
