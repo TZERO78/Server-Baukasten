@@ -84,7 +84,7 @@ Falls du während des Setups keinen SSH-Schlüssel hinterlegt hast, solltest du 
 - Starte den SSH-Dienst neu: `sudo systemctl restart ssh`.
 
 **3. Root-Konto sperren**
-Nachdem du den `sudo`-Zugang für deinen Admin-Benutzer getestet hast, sperre den direkten Login für den `root`-Benutzer. Dies ist ein wichtiger Härtungsschritt.
+Nachdem du den `sudo`-Zugang für deinen Admin-Benutzer getestet hast, sperre den direkten Login für den `root`-Benutzer.
 ```bash
 sudo passwd -l root
 ```
@@ -95,39 +95,11 @@ Ein abschließender Neustart stellt sicher, dass alle Dienste korrekt starten un
 sudo reboot
 ```
 
-### GeoIP-Blocking verwalten (`geoip-manager`)
-
-Das Skript installiert ein kleines, praktisches Werkzeug namens `geoip-manager`, um das GeoIP-Blocking einfach zu verwalten. Hier sind die wichtigsten Befehle:
-
-| Befehl                        | Beschreibung                                                               |
-| :---------------------------- | :------------------------------------------------------------------------- |
-| `sudo geoip-manager status`   | Zeigt den Gesamtstatus, Konfiguration und Anzahl der geladenen IPs.        |
-| `sudo geoip-manager update`   | Startet manuell ein sofortiges Update der IP-Listen von IPDeny.            |
-| `sudo geoip-manager hits`     | Zeigt an, wie viele Pakete von den GeoIP-Regeln blockiert/erlaubt wurden.    |
-| `sudo geoip-manager test <IP>`| Simuliert, wie die Firewall eine bestimmte IP-Adresse behandeln würde.       |
-| `sudo geoip-manager allow <IP>`| Fügt eine IP-Adresse zur manuellen Ausnahmeliste (Whitelist) hinzu.        |
-| `sudo geoip-manager logs`     | Zeigt die letzten Log-Einträge des wöchentlichen Update-Dienstes an.        |
-
-**Beispiel-Ausgabe:**
+**5. GeoIP-Blocking aktivieren (nach dem Neustart)**
+Nach dem Neustart sind die GeoIP-Listen in der Firewall leer. Führe diesen Befehl aus, um sie sofort zu befüllen und den Länderschutz zu aktivieren.
 ```bash
-$ sudo geoip-manager status
-=== GeoIP-Blocking Status ===
-Blockierte Länder: CN RU KP IR
-Heimatland (geschützt): DE
-...
-Firewall-Integration: ✅ Aktiv und integriert
-Heimatland IPs: 12589 (v4), 452 (v6)
-Blockierte IPs: 15432 (v4), 876 (v6)
-
-> **⚠️ Wichtiger Hinweis nach einem Server-Neustart**
->
-> Nach einem `reboot` sind die GeoIP-Sets in der Firewall **zuerst leer**. Der automatische `systemd`-Timer füllt diese zwar bei seinem nächsten wöchentlichen Lauf, für sofortigen Schutz musst du sie aber einmalig manuell befüllen.
->
-> Führe daher nach jedem Neustart diesen Befehl aus:
-> ```bash
-> sudo geoip-manager update
-> ```
-
+sudo geoip-manager update
+```
 
 ## 🎯 Design-Philosophie
 
@@ -155,12 +127,21 @@ sudo systemctl list-timers
 # Firewall-Regeln anzeigen
 sudo nft list ruleset
 
-# GeoIP-Blocking-Status
-sudo geoip-manager status
-
 # CrowdSec-Statistiken
 sudo cscli metrics
 ```
+
+### GeoIP-Blocking verwalten (`geoip-manager`)
+Das Skript installiert ein kleines, praktisches Werkzeug namens `geoip-manager`, um das GeoIP-Blocking einfach zu verwalten.
+
+| Befehl                        | Beschreibung                                                               |
+| :---------------------------- | :------------------------------------------------------------------------- |
+| `sudo geoip-manager status`   | Zeigt den Gesamtstatus, Konfiguration und Anzahl der geladenen IPs.        |
+| `sudo geoip-manager update`   | Startet manuell ein sofortiges Update der IP-Listen.                       |
+| `sudo geoip-manager hits`     | Zeigt an, wie viele Pakete von den GeoIP-Regeln blockiert/erlaubt wurden.    |
+| `sudo geoip-manager test <IP>`| Simuliert, wie die Firewall eine bestimmte IP-Adresse behandeln würde.       |
+| `sudo geoip-manager allow <IP>`| Fügt eine IP-Adresse zur manuellen Ausnahmeliste (Whitelist) hinzu.        |
+| `sudo geoip-manager logs`     | Zeigt die letzten Log-Einträge des wöchentlichen Update-Dienstes an.        |
 
 ### Logs
 ```bash
@@ -173,22 +154,4 @@ sudo journalctl --since "1 hour ago" --priority=err
 
 ## 📄 Lizenz
 
-Dieses Projekt steht unter der MIT-Lizenz - siehe [LICENSE](LICENSE) für Details.
-
-## 🙏 Danksagungen
-
-Dieses Projekt baut auf den Ideen und der Arbeit vieler anderer auf. Ein großer Dank geht an:
-
-* [**CrowdSec**](https://crowdsec.net/) für ihre herausragende Arbeit im Bereich kollektiver Threat Intelligence.
-* [**IPDeny**](https://www.ipdeny.com/) für die kostenlose Bereitstellung der GeoIP-Datenbanken.
-* Die gesamte **Linux-Community** für unzählige Best Practices und jahrzehntelanges geteiltes Wissen.
-
-Besonderer Dank für die Inspiration und die vielen Denkanstöße, die zu diesem Projekt geführt haben, gilt den YouTube-Kanälen:
-
-* [**Christian's ion.it / Apfelcast**](https://www.youtube.com/@ionit-itservice)
-* [**ct3003**](https://www.youtube.com/@ct3003)
-* [**Raspberry Pi Cloud**](https://www.youtube.com/@RaspberryPiCloud)
-* [**Geek Freaks**](https://www.google.com/search?q=https://www.youtube.com/%40ionit-itservice)
-
----
-⭐ **Star dieses Repository wenn es dir geholfen hat!** ⭐
+Dieses Projekt steht unter der MIT-Lizenz - siehe [LICENSE](
