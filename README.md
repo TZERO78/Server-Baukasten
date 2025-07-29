@@ -119,6 +119,15 @@ Firewall-Integration: ✅ Aktiv und integriert
 Heimatland IPs: 12589 (v4), 452 (v6)
 Blockierte IPs: 15432 (v4), 876 (v6)
 
+> **⚠️ Wichtiger Hinweis nach einem Server-Neustart**
+>
+> Nach einem `reboot` sind die GeoIP-Sets in der Firewall **zuerst leer**. Der automatische `systemd`-Timer füllt diese zwar bei seinem nächsten wöchentlichen Lauf, für sofortigen Schutz musst du sie aber einmalig manuell befüllen.
+>
+> Führe daher nach jedem Neustart diesen Befehl aus:
+> ```bash
+> sudo geoip-manager update
+> ```
+
 
 ## 🎯 Design-Philosophie
 
