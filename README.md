@@ -154,4 +154,22 @@ sudo journalctl --since "1 hour ago" --priority=err
 
 ## 📄 Lizenz
 
-Dieses Projekt steht unter der MIT-Lizenz - siehe [LICENSE](
+Dieses Projekt steht unter der MIT-Lizenz - siehe [LICENSE](LICENSE) für Details.
+
+## 🙏 Danksagungen
+
+Dieses Projekt baut auf den Ideen und der Arbeit vieler anderer auf. Ein großer Dank geht an:
+
+* [**CrowdSec**](https://crowdsec.net/) für ihre herausragende Arbeit im Bereich kollektiver Threat Intelligence.
+* [**IPDeny**](https://www.ipdeny.com/) für die kostenlose Bereitstellung der GeoIP-Datenbanken.
+* Die gesamte **Linux-Community** für unzählige Best Practices und jahrzehntelanges geteiltes Wissen.
+
+Besonderer Dank für die Inspiration und die vielen Denkanstöße, die zu diesem Projekt geführt haben, gilt den YouTube-Kanälen:
+
+* [**Christian's ion.it / Apfelcast**](https://www.youtube.com/@ionit-itservice)
+* [**ct3003**](https://www.youtube.com/@ct3003)
+* [**Raspberry Pi Cloud**](https://www.youtube.com/@RaspberryPiCloud)
+* [**Geek Freaks**](https://www.google.com/search?q=https://www.youtube.com/%40ionit-itservice)
+
+---
+⭐ **Star dieses Repository wenn es dir geholfen hat!** ⭐
