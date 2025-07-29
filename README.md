@@ -95,6 +95,31 @@ Ein abschließender Neustart stellt sicher, dass alle Dienste korrekt starten un
 sudo reboot
 ```
 
+### GeoIP-Blocking verwalten (`geoip-manager`)
+
+Das Skript installiert ein kleines, praktisches Werkzeug namens `geoip-manager`, um das GeoIP-Blocking einfach zu verwalten. Hier sind die wichtigsten Befehle:
+
+| Befehl                        | Beschreibung                                                               |
+| :---------------------------- | :------------------------------------------------------------------------- |
+| `sudo geoip-manager status`   | Zeigt den Gesamtstatus, Konfiguration und Anzahl der geladenen IPs.        |
+| `sudo geoip-manager update`   | Startet manuell ein sofortiges Update der IP-Listen von IPDeny.            |
+| `sudo geoip-manager hits`     | Zeigt an, wie viele Pakete von den GeoIP-Regeln blockiert/erlaubt wurden.    |
+| `sudo geoip-manager test <IP>`| Simuliert, wie die Firewall eine bestimmte IP-Adresse behandeln würde.       |
+| `sudo geoip-manager allow <IP>`| Fügt eine IP-Adresse zur manuellen Ausnahmeliste (Whitelist) hinzu.        |
+| `sudo geoip-manager logs`     | Zeigt die letzten Log-Einträge des wöchentlichen Update-Dienstes an.        |
+
+**Beispiel-Ausgabe:**
+```bash
+$ sudo geoip-manager status
+=== GeoIP-Blocking Status ===
+Blockierte Länder: CN RU KP IR
+Heimatland (geschützt): DE
+...
+Firewall-Integration: ✅ Aktiv und integriert
+Heimatland IPs: 12589 (v4), 452 (v6)
+Blockierte IPs: 15432 (v4), 876 (v6)
+
+
 ## 🎯 Design-Philosophie
 
 **Einfachheit durch Ein-Datei-Ansatz:**
