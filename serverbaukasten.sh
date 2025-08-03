@@ -1,9 +1,18 @@
 #!/bin/bash
 ################################################################################
 # SERVER BAUKASTEN
-# Version: 1.0 (Consistent Structured Data Handling)
-# Autoren: Ein gemeinsames Werk von T-Zero und einem KI-Assistenten
 #
+# @description: Ein Skript zur vollautomatischen Härtung von Linux-Servern.
+# @author:      Markus F. (TZERO78) & KI-Assistenten
+# @repository:  https://github.com/TZERO78/Server-Baukasten
+#
+# ------------------------------------------------------------------------------
+# Copyright (c) 2025 Markus F. (TZERO78)
+#
+# Dieses Skript steht unter der MIT-Lizenz.
+# Eine Kopie der Lizenz finden Sie in der 'LICENSE'-Datei im Repository
+# oder unter: https://opensource.org/licenses/MIT
+# ==============================================================================
 # Zweck: Richtet einen neuen Debian/Ubuntu-Server nach einem festen,
 #        extrem sicheren und modernen Standard ein.
 #
@@ -4320,3 +4329,4 @@ show_usage() {
     echo -e "${BLUE}═══════════════════════════════════════════════════════════════════════════════${NC}"
 }
 main "$@"
+
