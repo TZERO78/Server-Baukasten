@@ -714,6 +714,39 @@ cleanup_admin_sudo_rights_emergency() {
     fi
 }
 
+
+##
+# Fragt nach sensiblen Daten-Bereinigung und löscht die Config-Datei sicher
+##
+cleanup_sensitive_data() {
+    if [ -n "$CONFIG_FILE" ] && [ -f "$CONFIG_FILE" ]; then
+        print_section_header "SECURITY" "Sensible Daten bereinigen" "🔒"
+        
+        echo -e "  ${RED}⚠️  Die Konfigurationsdatei enthält Klartext-Passwörter:${NC}"
+        echo -e "  ${CYAN}📄 $CONFIG_FILE${NC}"
+        echo -e "  ${BLUE}💡 Empfehlung: Sichere Löschung mit 3x Überschreibung${NC}\n"
+        
+        local cleanup_choice
+        prompt_for_yes_no "Konfigurationsdatei jetzt sicher löschen? (Empfohlen)" "cleanup_choice" "ja"
+        
+        if [ "$cleanup_choice" = "ja" ]; then
+            if run_with_spinner "Sichere Löschung der Konfigurationsdatei..." "shred -vfz -n 3 '$CONFIG_FILE'"; then
+                log_ok "Konfigurationsdatei sicher überschrieben und gelöscht."
+            else
+                log_warn "shred fehlgeschlagen - verwende normales rm als Fallback"
+                rm -f "$CONFIG_FILE"
+                log_warn "Datei gelöscht, aber eventuell forensisch wiederherstellbar."
+            fi
+        else
+            log_error "KONFIGURATIONSDATEI NICHT GELÖSCHT!"
+            print_summary_warning "Datei enthält Klartext-Passwörter: $CONFIG_FILE"
+            print_summary_tip "Manuell löschen: shred -vfz -n 3 '$CONFIG_FILE'"
+        fi
+    else
+        log_info "✅ Keine Konfigurationsdatei verwendet - keine sensiblen Daten zu bereinigen."
+    fi
+}
+
 ###########################################################################################
 #
 #                      SETUP-FUNKTIONEN FÜR SERVER-SICHERHEIT
@@ -4245,6 +4278,8 @@ main() {
     
     # Fehlerfalle nach erfolgreichem Setup deaktivieren
     trap - ERR
+    # Sicherheits-Cleanup VOR der Zusammenfassung
+    cleanup_sensitive_data
     
     show_summary
     
@@ -4329,4 +4364,5 @@ show_usage() {
     echo -e "${BLUE}═══════════════════════════════════════════════════════════════════════════════${NC}"
 }
 main "$@"
+
 
