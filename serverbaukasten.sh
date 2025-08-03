@@ -716,34 +716,39 @@ cleanup_admin_sudo_rights_emergency() {
 
 
 ##
-# Fragt nach sensiblen Daten-Bereinigung und löscht die Config-Datei sicher
+# Bietet an, die Konfigurationsdatei mit sensiblen Daten am Ende des Skripts sicher zu löschen.
 ##
 cleanup_sensitive_data() {
     if [ -n "$CONFIG_FILE" ] && [ -f "$CONFIG_FILE" ]; then
-        print_section_header "SECURITY" "Sensible Daten bereinigen" "🔒"
+        print_section_header "SICHERHEIT" "SENSIBLE DATEN BEREINIGEN" "🔒"
         
-        echo -e "  ${RED}⚠️  Die Konfigurationsdatei enthält Klartext-Passwörter:${NC}"
-        echo -e "  ${CYAN}📄 $CONFIG_FILE${NC}"
-        echo -e "  ${BLUE}💡 Empfehlung: Sichere Löschung mit 3x Überschreibung${NC}\n"
+        log_warn "Die Konfigurationsdatei '$CONFIG_FILE' enthält Klartext-Passwörter!"
+        log_info "Empfehlung: Sicheres Löschen, um die Daten rückstandslos zu entfernen."
         
         local cleanup_choice
-        prompt_for_yes_no "Konfigurationsdatei jetzt sicher löschen? (Empfohlen)" "cleanup_choice" "ja"
+        prompt_for_yes_no "Soll die Konfigurationsdatei jetzt sicher gelöscht werden?" "cleanup_choice" "ja"
         
         if [ "$cleanup_choice" = "ja" ]; then
-            if run_with_spinner "Sichere Löschung der Konfigurationsdatei..." "shred -vfz -n 3 '$CONFIG_FILE'"; then
-                log_ok "Konfigurationsdatei sicher überschrieben und gelöscht."
+            if command -v shred &>/dev/null; then
+                if run_with_spinner "Lösche Konfigurationsdatei sicher (shred)..." "shred -n 3 -uz '$CONFIG_FILE'"; then
+                    log_ok "Konfigurationsdatei sicher überschrieben und gelöscht."
+                else
+                    log_warn "Sicheres Löschen mit 'shred' fehlgeschlagen. Nutze 'rm' als Fallback."
+                    rm -f "$CONFIG_FILE"
+                    log_info "Konfigurationsdatei gelöscht (möglicherweise wiederherstellbar)."
+                fi
             else
-                log_warn "shred fehlgeschlagen - verwende normales rm als Fallback"
+                log_warn "'shred' ist nicht installiert. Nutze 'rm' als Fallback."
                 rm -f "$CONFIG_FILE"
-                log_warn "Datei gelöscht, aber eventuell forensisch wiederherstellbar."
+                log_info "Konfigurationsdatei gelöscht (möglicherweise wiederherstellbar)."
             fi
         else
-            log_error "KONFIGURATIONSDATEI NICHT GELÖSCHT!"
-            print_summary_warning "Datei enthält Klartext-Passwörter: $CONFIG_FILE"
-            print_summary_tip "Manuell löschen: shred -vfz -n 3 '$CONFIG_FILE'"
+            log_error "KONFIGURATIONSDATEI WURDE NICHT GELÖSCHT!"
+            log_warn "Die Datei '$CONFIG_FILE' enthält weiterhin Klartext-Passwörter."
+            log_info "  -> Manuell löschen mit: shred -u '$CONFIG_FILE'"
         fi
     else
-        log_info "✅ Keine Konfigurationsdatei verwendet - keine sensiblen Daten zu bereinigen."
+        log_info "Keine Konfigurationsdatei verwendet, keine sensiblen Daten zu bereinigen."
     fi
 }
 
@@ -4364,5 +4369,6 @@ show_usage() {
     echo -e "${BLUE}═══════════════════════════════════════════════════════════════════════════════${NC}"
 }
 main "$@"
+
 
 
