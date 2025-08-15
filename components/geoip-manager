@@ -1,0 +1,530 @@
+#!/bin/bash
+################################################################################
+# GEOIP MANAGEMENT TOOL v2.0 - STANDALONE
+#
+# @description: Eigenständiges Management-Tool für das Set-basierte GeoIP-Blocking
+# @author:      Markus F. (TZERO78) & KI-Assistenten
+# @repository:  https://github.com/TZERO78/Server-Baukasten
+#
+# ------------------------------------------------------------------------------
+# Verwendung:
+#   geoip-manager status          - Zeigt Status und Statistiken
+#   geoip-manager update          - Startet manuelles Update
+#   geoip-manager hits            - Zeigt Traffic-Statistiken
+#   geoip-manager test <IP>       - Testet IP-Behandlung
+#   geoip-manager allow <IP>      - Fügt IP zur Allowlist hinzu
+#   geoip-manager logs [Anzahl]   - Zeigt Update-Logs
+#   geoip-manager help            - Zeigt ausführliche Hilfe
+################################################################################
+
+set -eo pipefail
+
+# ═══════════════════════════════════════════════════════════════════════════
+# KONFIGURATION & VARIABLEN
+# ═══════════════════════════════════════════════════════════════════════════
+
+readonly VERSION="2.0.0"
+readonly COUNTRIES_FILE="/etc/geoip-countries.conf"
+readonly HOME_COUNTRY_FILE="/etc/geoip-home-country.conf"
+readonly ALLOWLIST_FILE="/etc/geoip-allowlist.conf"
+readonly UPDATE_SCRIPT="/usr/local/bin/update-geoip-sets.sh"
+readonly LOG_TAG="geoip-manager"
+
+# Farben für bessere Lesbarkeit
+RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; BLUE='\033[0;34m'
+CYAN='\033[0;36m'; PURPLE='\033[0;35m'; NC='\033[0m'
+
+# ═══════════════════════════════════════════════════════════════════════════
+# LOGGING & HELPER-FUNKTIONEN
+# ═══════════════════════════════════════════════════════════════════════════
+
+log_info() { echo -e "${CYAN}›${NC} $*"; }
+log_ok() { echo -e "${GREEN}✅ $*${NC}"; }
+log_warn() { echo -e "${YELLOW}⚠️  $*${NC}"; }
+log_error() { echo -e "${RED}❌ $*${NC}" >&2; }
+
+##
+# Gibt einen formatierten Header aus.
+##
+print_header() {
+    local title="$1"
+    echo -e "\n${BLUE}=== $title ===${NC}"
+}
+
+##
+# Prüft, ob alle nötigen Abhängigkeiten verfügbar sind.
+##
+check_dependencies() {
+    local missing_deps=()
+    
+    for cmd in nft systemctl journalctl; do
+        if ! command -v "$cmd" >/dev/null 2>&1; then
+            missing_deps+=("$cmd")
+        fi
+    done
+    
+    if [ ${#missing_deps[@]} -gt 0 ]; then
+        log_error "Fehlende Abhängigkeiten: ${missing_deps[*]}"
+        log_error "Bitte installiere die fehlenden Pakete und versuche es erneut."
+        exit 1
+    fi
+}
+
+##
+# Prüft, ob das GeoIP-System korrekt installiert ist.
+##
+check_geoip_installation() {
+    local missing_files=()
+    
+    # Prüfe Konfigurationsdateien
+    [ ! -f "$COUNTRIES_FILE" ] && missing_files+=("$COUNTRIES_FILE")
+    [ ! -f "$HOME_COUNTRY_FILE" ] && missing_files+=("$HOME_COUNTRY_FILE")
+    [ ! -f "$UPDATE_SCRIPT" ] && missing_files+=("$UPDATE_SCRIPT")
+    
+    if [ ${#missing_files[@]} -gt 0 ]; then
+        log_error "GeoIP-System nicht vollständig installiert!"
+        log_error "Fehlende Dateien: ${missing_files[*]}"
+        log_info "Führe zuerst den Server-Baukasten aus oder installiere die Komponenten manuell."
+        exit 1
+    fi
+    
+    # Prüfe NFTables-Integration
+    if ! nft list chain inet filter geoip_check >/dev/null 2>&1; then
+        log_error "GeoIP-Chain 'geoip_check' nicht gefunden!"
+        log_error "Firewall-Integration fehlt oder ist beschädigt."
+        exit 1
+    fi
+}
+
+# ═══════════════════════════════════════════════════════════════════════════
+# KERN-FUNKTIONEN FÜR GEOIP-MANAGEMENT
+# ═══════════════════════════════════════════════════════════════════════════
+
+##
+# Erkennt den aktuellen Status der GeoIP-Chain.
+##
+detect_geoip_chain_status() {
+    # 1. Existiert die Chain?
+    if ! nft list chain inet filter geoip_check >/dev/null 2>&1; then
+        echo "missing"
+        return
+    fi
+    
+    # 2. Ist die Chain in die Input-Chain integriert?
+    if ! nft list chain inet filter input | grep -q "jump geoip_check"; then
+        echo "unintegrated"
+        return
+    fi
+    
+    # 3. Sind die Sets gefüllt?
+    local stats=($(get_set_stats))
+    local total_ips=$(( ${stats[0]} + ${stats[1]} + ${stats[2]} + ${stats[3]} ))
+    
+    if [ "$total_ips" -gt 10 ]; then
+        echo "active"
+    else
+        echo "empty_sets"
+    fi
+}
+
+##
+# Zählt die IPs in allen GeoIP-Sets.
+##
+get_set_stats() {
+    local home_v4=$(nft list set inet filter geoip_home_v4 2>/dev/null | grep -c "^[[:space:]]*[0-9]" || echo "0")
+    local home_v6=$(nft list set inet filter geoip_home_v6 2>/dev/null | grep -c "^[[:space:]]*[0-9a-f:]" || echo "0")
+    local blocked_v4=$(nft list set inet filter geoip_blocked_v4 2>/dev/null | grep -c "^[[:space:]]*[0-9]" || echo "0")
+    local blocked_v6=$(nft list set inet filter geoip_blocked_v6 2>/dev/null | grep -c "^[[:space:]]*[0-9a-f:]" || echo "0")
+    
+    echo "$home_v4 $home_v6 $blocked_v4 $blocked_v6"
+}
+
+##
+# Sammelt Konfigurationsdaten aus den Config-Dateien.
+##
+get_configuration() {
+    local blocked_countries=$(cat "$COUNTRIES_FILE" 2>/dev/null || echo 'Nicht konfiguriert')
+    local home_country=$(cat "$HOME_COUNTRY_FILE" 2>/dev/null || echo 'Nicht gesetzt')
+    
+    echo "$blocked_countries|$home_country"
+}
+
+# ═══════════════════════════════════════════════════════════════════════════
+# BENUTZER-KOMMANDOS
+# ═══════════════════════════════════════════════════════════════════════════
+
+##
+# Zeigt einen detaillierten Status-Überblick.
+##
+show_status() {
+    print_header "GeoIP-Blocking Status (Set-basiert) v$VERSION"
+    
+    # Konfiguration anzeigen
+    local config_data=$(get_configuration)
+    local blocked_countries=$(echo "$config_data" | cut -d'|' -f1)
+    local home_country=$(echo "$config_data" | cut -d'|' -f2)
+    
+    echo -e "${CYAN}Blockierte Länder:${NC} $blocked_countries"
+    echo -e "${GREEN}Heimatland (geschützt):${NC} $home_country"
+    echo
+    
+    # Service-Status
+    echo -e "${BLUE}--- Service & Automatisierung ---${NC}"
+    if systemctl is-active --quiet geoip-update.timer 2>/dev/null; then
+        local next_run=$(systemctl list-timers geoip-update.timer --no-pager 2>/dev/null | awk 'NR==2 {print $1, $2}' || echo "Unbekannt")
+        echo -e "Update-Timer: ${GREEN}Aktiv${NC} (Nächster Lauf: $next_run)"
+    else
+        echo -e "Update-Timer: ${RED}Inaktiv${NC}"
+        log_warn "Timer nicht aktiv! Aktivieren mit: systemctl enable --now geoip-update.timer"
+    fi
+    
+    local last_run=$(journalctl -t geoip-update -n 1 --output=short-precise 2>/dev/null | head -1 | cut -d' ' -f1-3 || echo "Nie")
+    echo -e "Letzter Update-Lauf: ${CYAN}$last_run${NC}"
+    echo
+    
+    # NFTables-Status & Set-Inhalte
+    echo -e "${BLUE}--- Firewall-Integration & Set-Inhalte ---${NC}"
+    local chain_status=$(detect_geoip_chain_status)
+    local stats=($(get_set_stats))
+    
+    case "$chain_status" in
+        "missing")
+            log_error "GeoIP-Chain fehlt! System ist nicht korrekt installiert."
+            return 1 ;;
+        "unintegrated")
+            log_warn "GeoIP-Chain ist nicht in der Firewall aktiv (jump-Regel fehlt)!" ;;
+        "empty_sets")
+            log_warn "GeoIP-Sets sind leer. Führe 'geoip-manager update' aus." ;;
+        "active")
+            echo -e "Firewall-Integration: ${GREEN}✅ Aktiv und integriert${NC}" ;;
+    esac
+    
+    echo -e "Heimatland-IPs: ${GREEN}${stats[0]} (IPv4), ${stats[1]} (IPv6)${NC}"
+    echo -e "Blockierte IPs: ${RED}${stats[2]} (IPv4), ${stats[3]} (IPv6)${NC}"
+    
+    # Allowlist-Statistik
+    local manual_allowlist_count=0
+    if [ -f "$ALLOWLIST_FILE" ]; then
+        manual_allowlist_count=$(grep -c '^[^#]' "$ALLOWLIST_FILE" 2>/dev/null || echo "0")
+    fi
+    echo -e "Manuelle Allowlist: ${CYAN}$manual_allowlist_count Einträge${NC}"
+    
+    echo
+    echo -e "${BLUE}--- Verwaltung & Logs ---${NC}"
+    echo -e "Status prüfen: ${YELLOW}geoip-manager status${NC}"
+    echo -e "Manuelles Update: ${YELLOW}geoip-manager update${NC}"
+    echo -e "Traffic-Statistiken: ${YELLOW}geoip-manager hits${NC}"
+    echo -e "Logs anzeigen: ${YELLOW}geoip-manager logs${NC}"
+}
+
+##
+# Führt ein manuelles Update der IP-Listen durch.
+##
+run_manual_update() {
+    print_header "MANUELLES GEOIP-UPDATE"
+    
+    if [ ! -x "$UPDATE_SCRIPT" ]; then
+        log_error "Update-Script '$UPDATE_SCRIPT' nicht gefunden oder nicht ausführbar!"
+        log_info "Installiere das GeoIP-System mit dem Server-Baukasten."
+        return 1
+    fi
+    
+    log_info "Starte manuelles Update der GeoIP-Listen..."
+    log_info "Dies kann je nach Anzahl der Länder 30-60 Sekunden dauern."
+    echo
+    
+    # Führe das Update-Script aus
+    if "$UPDATE_SCRIPT"; then
+        echo
+        log_ok "Manuelles Update erfolgreich abgeschlossen!"
+        log_info "Neue Set-Statistiken:"
+        local stats=($(get_set_stats))
+        echo -e "  Heimatland: ${GREEN}${stats[0]} (IPv4), ${stats[1]} (IPv6)${NC}"
+        echo -e "  Blockierte: ${RED}${stats[2]} (IPv4), ${stats[3]} (IPv6)${NC}"
+    else
+        log_error "Update fehlgeschlagen! Prüfe die Logs mit: journalctl -t geoip-update"
+        return 1
+    fi
+}
+
+##
+# Zeigt Traffic-Statistiken (Paket-Counter) der GeoIP-Regeln.
+##
+show_traffic_hits() {
+    print_header "GeoIP Traffic-Statistiken (seit letztem Neustart)"
+    
+    if ! nft list chain inet filter geoip_check >/dev/null 2>&1; then
+        log_error "GeoIP-Chain nicht gefunden! System nicht installiert."
+        return 1
+    fi
+    
+    local chain_content
+    chain_content=$(nft -a list chain inet filter geoip_check 2>/dev/null)
+    
+    if [ -z "$chain_content" ]; then
+        log_warn "GeoIP-Chain ist leer oder nicht erreichbar."
+        return 1
+    fi
+    
+    echo -e "${BLUE}Counter-Statistiken der GeoIP-Regeln:${NC}"
+    echo
+    
+    # Extrahiere Counter-Werte basierend auf Kommentaren
+    local rules=(
+        "Manual-Allow-v4:Manuelle IPv4-Allowlist"
+        "Manual-Allow-v6:Manuelle IPv6-Allowlist" 
+        "GeoIP-Allow-Home-v4:Heimatland IPv4"
+        "GeoIP-Allow-Home-v6:Heimatland IPv6"
+        "GeoIP-Block-v4:Blockierte IPv4"
+        "GeoIP-Block-v6:Blockierte IPv6"
+    )
+    
+    for rule_info in "${rules[@]}"; do
+        local comment=$(echo "$rule_info" | cut -d':' -f1)
+        local description=$(echo "$rule_info" | cut -d':' -f2)
+        
+        local stats=$(echo "$chain_content" | grep "comment \"$comment\"" | awk '{for(i=1;i<=NF;i++) if($i=="counter") {printf "Pakete: %s, Bytes: %s", $(i+2), $(i+4); break}}' || echo "Keine Daten")
+        
+        local color=$GREEN
+        [[ "$comment" =~ Block ]] && color=$RED
+        [[ "$comment" =~ Manual ]] && color=$CYAN
+        
+        printf "%-25s: %b\n" "$description" "${color}${stats}${NC}"
+    done
+    
+    echo
+    log_info "💡 Hohe Block-Counter deuten auf viele abgewehrte Angriffe hin."
+    log_info "💡 Counter werden bei jedem Neustart zurückgesetzt."
+}
+
+##
+# Testet, wie eine IP durch das GeoIP-System behandelt wird.
+##
+test_ip_treatment() {
+    local ip_to_test="$1"
+    
+    if [ -z "$ip_to_test" ]; then
+        log_error "Bitte eine IP-Adresse zum Testen angeben."
+        log_info "Verwendung: geoip-manager test <IP-ADRESSE>"
+        return 1
+    fi
+    
+    print_header "IP-BEHANDLUNG TESTEN: $ip_to_test"
+    
+    # Validiere IP-Format (einfache Prüfung)
+    if [[ ! "$ip_to_test" =~ ^[0-9.:a-fA-F]+$ ]]; then
+        log_error "Ungültiges IP-Format: $ip_to_test"
+        return 1
+    fi
+    
+    log_info "Teste Behandlung der IP '$ip_to_test' durch das GeoIP-System..."
+    echo
+    
+    # Nutze nft trace für detaillierte Verfolgung
+    log_info "🔍 Führe NFT-Trace durch (simuliert eingehende TCP-Verbindung)..."
+    
+    if [[ "$ip_to_test" == *":"* ]]; then
+        # IPv6
+        log_info "Trace-Befehl: nft trace inet filter input ip6 saddr $ip_to_test ip6 nexthdr tcp tcp dport 22"
+        echo
+        nft trace inet filter input ip6 saddr "$ip_to_test" ip6 nexthdr tcp tcp dport 22 2>&1 | head -20 || {
+            log_warn "Trace-Ausgabe nicht verfügbar. Prüfe manuell mit nft list ruleset."
+        }
+    else
+        # IPv4
+        log_info "Trace-Befehl: nft trace inet filter input ip saddr $ip_to_test ip protocol tcp tcp dport 22"
+        echo
+        nft trace inet filter input ip saddr "$ip_to_test" ip protocol tcp tcp dport 22 2>&1 | head -20 || {
+            log_warn "Trace-Ausgabe nicht verfügbar. Prüfe manuell mit nft list ruleset."
+        }
+    fi
+    
+    echo
+    log_info "💡 Interpretation der Trace-Ausgabe:"
+    log_info "   'accept' = IP wird durchgelassen"
+    log_info "   'drop' = IP wird blockiert"
+    log_info "   'jump geoip_check' = IP durchläuft GeoIP-Prüfung"
+}
+
+##
+# Fügt eine IP zur manuellen Allowlist hinzu.
+##
+add_ip_to_allowlist() {
+    local ip_to_allow="$1"
+    
+    if [ -z "$ip_to_allow" ]; then
+        log_error "Bitte IP-Adresse oder CIDR-Block für die Allowlist angeben."
+        log_info "Verwendung: geoip-manager allow <IP-ADRESSE-ODER-CIDR>"
+        log_info "Beispiele: geoip-manager allow 192.168.1.100"
+        log_info "          geoip-manager allow 10.0.0.0/24"
+        return 1
+    fi
+    
+    print_header "IP ZUR ALLOWLIST HINZUFÜGEN: $ip_to_allow"
+    
+    # Validiere IP/CIDR-Format
+    if [[ ! "$ip_to_allow" =~ ^[0-9.:a-fA-F/]+$ ]]; then
+        log_error "Ungültiges IP/CIDR-Format: $ip_to_allow"
+        return 1
+    fi
+    
+    # Bestimme Set-Typ (IPv4 oder IPv6)
+    local target_set=""
+    if [[ "$ip_to_allow" == *":"* ]]; then
+        target_set="geoip_allowlist_v6"
+        log_info "Erkannt als IPv6-Adresse/Netz"
+    else
+        target_set="geoip_allowlist_v4"
+        log_info "Erkannt als IPv4-Adresse/Netz"
+    fi
+    
+    # Füge zur NFTables-Allowlist hinzu
+    if nft add element inet filter "$target_set" "{ $ip_to_allow }" 2>/dev/null; then
+        log_ok "IP $ip_to_allow erfolgreich zum Set '$target_set' hinzugefügt."
+    else
+        log_error "Fehler beim Hinzufügen zu NFTables-Set!"
+        log_info "Prüfe IP-Format und ob die Sets existieren."
+        return 1
+    fi
+    
+    # Speichere in persistenter Datei
+    if ! grep -qxF "$ip_to_allow" "$ALLOWLIST_FILE" 2>/dev/null; then
+        echo "$ip_to_allow" >> "$ALLOWLIST_FILE"
+        log_ok "IP persistent in '$ALLOWLIST_FILE' gespeichert."
+    else
+        log_info "IP war bereits in der persistenten Allowlist."
+    fi
+    
+    log_info "💡 Die IP ist nun dauerhaft von GeoIP-Blocking ausgenommen."
+    log_info "💡 Entfernen mit: nft delete element inet filter $target_set { $ip_to_allow }"
+}
+
+##
+# Zeigt die letzten Log-Einträge des GeoIP-Update-Systems.
+##
+show_logs() {
+    local log_count="${1:-50}"
+    
+    print_header "GEOIP-UPDATE LOGS (letzte $log_count Einträge)"
+    
+    if ! command -v journalctl >/dev/null 2>&1; then
+        log_error "journalctl nicht verfügbar!"
+        return 1
+    fi
+    
+    log_info "Zeige die letzten $log_count Log-Einträge des GeoIP-Update-Systems..."
+    echo
+    
+    # Zeige Logs vom geoip-update Service
+    journalctl -t "geoip-update" -n "$log_count" --no-pager --output=short 2>/dev/null || {
+        log_warn "Keine Logs für 'geoip-update' gefunden."
+        log_info "Möglicherweise wurde noch nie ein Update durchgeführt."
+        log_info "Starte ein Update mit: geoip-manager update"
+    }
+}
+
+##
+# Zeigt die ausführliche Hilfe an.
+##
+show_help() {
+    cat << EOF
+${BLUE}geoip-manager v$VERSION${NC}
+Eigenständiges Management-Tool für das Set-basierte GeoIP-Blocking.
+
+${CYAN}VERWENDUNG:${NC}
+  geoip-manager [BEFEHL] [OPTIONEN]
+
+${CYAN}BEFEHLE:${NC}
+  status              - Zeigt Status, Konfiguration und Set-Statistiken
+  update              - Startet manuelles Update der IP-Listen (dauert ~60s)
+  hits                - Zeigt Traffic-Statistiken der GeoIP-Regeln
+  test <IP>           - Simuliert und verfolgt Behandlung einer IP
+  allow <IP/CIDR>     - Fügt IP/Netz zur manuellen Allowlist hinzu
+  logs [Anzahl]       - Zeigt Update-Logs (Standard: 50 Einträge)
+  help                - Zeigt diese ausführliche Hilfe
+
+${CYAN}BEISPIELE:${NC}
+  geoip-manager status                    # Status-Übersicht anzeigen
+  geoip-manager update                    # IP-Listen jetzt aktualisieren
+  geoip-manager test 8.8.8.8             # Teste Google-DNS
+  geoip-manager allow 192.168.1.0/24     # Erlaube lokales Netz
+  geoip-manager hits                      # Zeige Angriffs-Statistiken
+  geoip-manager logs 100                  # Zeige letzte 100 Log-Einträge
+
+${CYAN}VERWALTUNG:${NC}
+  systemctl status geoip-update.timer    # Timer-Status prüfen
+  systemctl restart geoip-update.timer   # Timer neu starten
+  journalctl -u geoip-update.service     # Service-Logs anzeigen
+
+${CYAN}KONFIGURATION:${NC}
+  Blockierte Länder: ${YELLOW}$COUNTRIES_FILE${NC}
+  Heimatland:        ${YELLOW}$HOME_COUNTRY_FILE${NC}
+  Manuelle Allowlist: ${YELLOW}$ALLOWLIST_FILE${NC}
+
+${CYAN}NOTFÄLLE:${NC}
+  GeoIP komplett deaktivieren:
+    nft delete rule inet filter input jump geoip_check
+  
+  Alle Blockierungen aufheben:
+    nft flush set inet filter geoip_blocked_v4
+    nft flush set inet filter geoip_blocked_v6
+
+${CYAN}SUPPORT:${NC}
+  📋 Repository: https://github.com/TZERO78/Server-Baukasten
+  🐛 Issues: https://github.com/TZERO78/Server-Baukasten/issues
+  📖 Dokumentation: https://github.com/TZERO78/Server-Baukasten/docs
+
+EOF
+}
+
+# ═══════════════════════════════════════════════════════════════════════════
+# HAUPTFUNKTION (KOMMANDO-ROUTER)
+# ═══════════════════════════════════════════════════════════════════════════
+
+##
+# Hauptfunktion - verarbeitet Benutzer-Befehle.
+##
+main() {
+    # Basis-Checks durchführen
+    check_dependencies
+    check_geoip_installation
+    
+    # Kommando verarbeiten
+    case "${1:-status}" in
+        status)
+            show_status
+            ;;
+        update)
+            run_manual_update
+            ;;
+        hits)
+            show_traffic_hits
+            ;;
+        test)
+            test_ip_treatment "$2"
+            ;;
+        allow)
+            add_ip_to_allowlist "$2"
+            ;;
+        logs)
+            show_logs "${2:-50}"
+            ;;
+        help|--help|-h)
+            show_help
+            ;;
+        *)
+            log_error "Unbekannter Befehl: '$1'"
+            echo
+            log_info "Verfügbare Befehle: status, update, hits, test, allow, logs, help"
+            log_info "Ausführliche Hilfe: geoip-manager help"
+            exit 1
+            ;;
+    esac
+}
+
+# ═══════════════════════════════════════════════════════════════════════════
+# SCRIPT-START
+# ═══════════════════════════════════════════════════════════════════════════
+
+# Führe die Hauptfunktion mit allen Argumenten aus
+main "$@"

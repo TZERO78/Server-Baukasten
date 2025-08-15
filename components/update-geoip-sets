@@ -1,0 +1,496 @@
+#!/bin/bash
+################################################################################
+# GEOIP SET UPDATER v2.0 - STANDALONE
+#
+# @description: Eigenständiges Update-Script für GeoIP-Sets mit Chunking
+# @author:      Markus F. (TZERO78) & KI-Assistenten
+# @repository:  https://github.com/TZERO78/Server-Baukasten
+#
+# ------------------------------------------------------------------------------
+# Lädt IP-Listen von ipdeny.com und befüllt die persistenten nftables-Sets.
+# Inklusive Chunking für sehr große Listen, um ARG_MAX Limits zu umgehen.
+#
+# Verwendung:
+#   ./update-geoip-sets.sh           # Normaler Update-Lauf
+#   DEBUG=true ./update-geoip-sets.sh # Mit Debug-Ausgaben
+################################################################################
+
+set -euo pipefail
+
+# ═══════════════════════════════════════════════════════════════════════════
+# KONFIGURATION
+# ═══════════════════════════════════════════════════════════════════════════
+
+readonly VERSION="2.0.0"
+readonly LOG_TAG="geoip-update"
+readonly COUNTRIES_FILE="/etc/geoip-countries.conf"
+readonly HOME_COUNTRY_FILE="/etc/geoip-home-country.conf"
+readonly ALLOWLIST_FILE="/etc/geoip-allowlist.conf"
+readonly CHUNK_SIZE=2000  # Elemente pro `nft add element` Aufruf
+readonly DOWNLOAD_TIMEOUT=60
+readonly CONNECT_TIMEOUT=15
+
+# Farben für bessere Lesbarkeit
+RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; BLUE='\033[0;34m'
+CYAN='\033[0;36m'; NC='\033[0m'
+
+# ═══════════════════════════════════════════════════════════════════════════
+# LOGGING-SYSTEM
+# ═══════════════════════════════════════════════════════════════════════════
+
+##
+# Loggt Informationen sowohl an stdout als auch an systemd-journal.
+##
+log_info() { 
+    echo -e "${CYAN}[INFO]${NC} $*" >&2
+    if command -v logger &>/dev/null; then
+        logger -t "$LOG_TAG" -p "daemon.info" "$*"
+    fi
+}
+
+##
+# Loggt Erfolgs-Meldungen.
+##
+log_ok() { 
+    echo -e "${GREEN}[OK]${NC} $*" >&2
+    if command -v logger &>/dev/null; then
+        logger -t "$LOG_TAG" -p "daemon.notice" "SUCCESS: $*"
+    fi
+}
+
+##
+# Loggt Warnungen.
+##
+log_warn() { 
+    echo -e "${YELLOW}[WARN]${NC} $*" >&2
+    if command -v logger &>/dev/null; then
+        logger -t "$LOG_TAG" -p "daemon.warning" "WARN: $*"
+    fi
+}
+
+##
+# Loggt Fehler.
+##
+log_error() { 
+    echo -e "${RED}[ERROR]${NC} $*" >&2
+    if command -v logger &>/dev/null; then
+        logger -t "$LOG_TAG" -p "daemon.err" "ERROR: $*"
+    fi
+}
+
+##
+# Debug-Logging (nur wenn DEBUG=true).
+##
+log_debug() { 
+    if [ "${DEBUG:-false}" = "true" ]; then
+        echo -e "${BLUE}[DEBUG]${NC} $*" >&2
+        if command -v logger &>/dev/null; then
+            logger -t "$LOG_TAG" -p "daemon.debug" "DEBUG: $*"
+        fi
+    fi
+}
+
+# ═══════════════════════════════════════════════════════════════════════════
+# DEPENDENCY-CHECKS
+# ═══════════════════════════════════════════════════════════════════════════
+
+##
+# Prüft alle erforderlichen Abhängigkeiten.
+##
+check_dependencies() {
+    local missing_deps=()
+    
+    for cmd in curl nft split; do
+        if ! command -v "$cmd" >/dev/null 2>&1; then
+            missing_deps+=("$cmd")
+        fi
+    done
+    
+    if [ ${#missing_deps[@]} -gt 0 ]; then
+        log_error "Fehlende Abhängigkeiten: ${missing_deps[*]}"
+        log_error "Bitte installiere die fehlenden Pakete: apt-get install ${missing_deps[*]}"
+        exit 1
+    fi
+    
+    log_debug "Alle Abhängigkeiten verfügbar: curl, nft, split"
+}
+
+##
+# Prüft, ob die GeoIP-Konfiguration vorhanden ist.
+##
+check_configuration() {
+    local missing_files=()
+    
+    [ ! -f "$COUNTRIES_FILE" ] && missing_files+=("$COUNTRIES_FILE")
+    [ ! -f "$HOME_COUNTRY_FILE" ] && missing_files+=("$HOME_COUNTRY_FILE")
+    
+    if [ ${#missing_files[@]} -gt 0 ]; then
+        log_error "Fehlende Konfigurationsdateien: ${missing_files[*]}"
+        log_error "Führe zuerst den Server-Baukasten aus oder erstelle die Dateien manuell."
+        exit 1
+    fi
+    
+    # Prüfe NFTables-Sets
+    local missing_sets=()
+    for set_name in geoip_blocked_v4 geoip_blocked_v6 geoip_home_v4 geoip_home_v6 geoip_allowlist_v4 geoip_allowlist_v6; do
+        if ! nft list set inet filter "$set_name" >/dev/null 2>&1; then
+            missing_sets+=("$set_name")
+        fi
+    done
+    
+    if [ ${#missing_sets[@]} -gt 0 ]; then
+        log_error "Fehlende NFTables-Sets: ${missing_sets[*]}"
+        log_error "GeoIP-System ist nicht korrekt installiert!"
+        exit 1
+    fi
+    
+    log_debug "Konfiguration und NFTables-Sets sind verfügbar."
+}
+
+# ═══════════════════════════════════════════════════════════════════════════
+# DOWNLOAD-FUNKTIONEN
+# ═══════════════════════════════════════════════════════════════════════════
+
+##
+# Lädt IP-Listen für ein bestimmtes Land herunter.
+##
+download_country_ips() {
+    local country="$1"
+    local output_file="$2"
+    local ip_version="${3:-v4}"
+    
+    local country_lower
+    country_lower=$(echo "$country" | tr '[:upper:]' '[:lower:]')
+    
+    local url=""
+    if [ "$ip_version" = "v6" ]; then
+        url="https://www.ipdeny.com/ipv6/ipaddresses/blocks/${country_lower}.zone"
+    else
+        url="https://www.ipdeny.com/ipblocks/data/countries/${country_lower}.zone"
+    fi
+    
+    log_debug "Download $country ($ip_version): $url -> $output_file"
+    
+    local http_code
+    http_code=$(curl -L -s -w "%{http_code}" \
+        --max-time "$DOWNLOAD_TIMEOUT" \
+        --connect-timeout "$CONNECT_TIMEOUT" \
+        --retry 3 \
+        --retry-delay 2 \
+        -o "$output_file" "$url" 2>/dev/null)
+    
+    if [ "$http_code" -eq 200 ] && [ -s "$output_file" ]; then
+        local line_count
+        line_count=$(wc -l < "$output_file")
+        log_debug "Download erfolgreich: $country ($ip_version) - $line_count IPs"
+        return 0
+    else
+        log_debug "Download fehlgeschlagen: $country ($ip_version) - HTTP $http_code"
+        # Bei IPv6 ist ein Fehlschlag oft normal (nicht jedes Land hat IPv6-Blöcke)
+        if [ "$ip_version" = "v6" ]; then
+            log_debug "IPv6-Download für $country fehlgeschlagen (normal, wenn keine IPv6-Blöcke vorhanden)"
+            return 1
+        else
+            log_warn "IPv4-Download für $country fehlgeschlagen (HTTP-Code: $http_code)"
+            return 1
+        fi
+    fi
+}
+
+##
+# Lädt alle IP-Listen für eine Liste von Ländern.
+##
+download_countries_batch() {
+    local countries="$1"
+    local target_file="$2"
+    local ip_version="${3:-v4}"
+    
+    log_info "Lade ${ip_version}-Listen für Länder: $countries"
+    
+    local success_count=0
+    local total_count=0
+    
+    for country in $countries; do
+        ((total_count++))
+        local temp_file
+        temp_file=$(mktemp)
+        
+        if download_country_ips "$country" "$temp_file" "$ip_version"; then
+            cat "$temp_file" >> "$target_file"
+            ((success_count++))
+            log_debug "  ✓ $country ($ip_version)"
+        else
+            log_debug "  ✗ $country ($ip_version) - übersprungen"
+        fi
+        
+        rm -f "$temp_file"
+    done
+    
+    log_info "$ip_version: $success_count/$total_count Länder erfolgreich geladen"
+    
+    if [ "$success_count" -eq 0 ]; then
+        log_warn "Keine $ip_version-Listen konnten geladen werden!"
+        return 1
+    fi
+    
+    return 0
+}
+
+# ═══════════════════════════════════════════════════════════════════════════
+# CHUNKING & SET-UPDATE-FUNKTIONEN
+# ═══════════════════════════════════════════════════════════════════════════
+
+##
+# Fügt IPs mit Chunking zu einem NFTables-Set hinzu.
+##
+add_elements_in_chunks() {
+    local set_name="$1"
+    local ip_file="$2"
+    
+    if [ ! -s "$ip_file" ]; then
+        log_debug "IP-Datei '$ip_file' ist leer - überspringe Set '$set_name'"
+        return 0
+    fi
+    
+    local line_count
+    line_count=$(wc -l < "$ip_file")
+    log_info "Füge $line_count IPs zu Set '$set_name' hinzu..."
+    
+    if [ "$line_count" -gt "$CHUNK_SIZE" ]; then
+        log_info "  -> Liste groß ($line_count IPs), aktiviere Chunking ($CHUNK_SIZE pro Block)"
+        
+        local chunk_prefix
+        chunk_prefix=$(mktemp -u /tmp/geoip_chunk_XXXXXX)
+        
+        # Aufteilen in kleinere Dateien
+        split -l "$CHUNK_SIZE" "$ip_file" "$chunk_prefix"
+        
+        local chunk_count=0
+        for chunk_file in "${chunk_prefix}"*; do
+            if [ -f "$chunk_file" ]; then
+                ((chunk_count++))
+                log_debug "  -> Verarbeite Chunk $chunk_count: $(basename "$chunk_file")"
+                
+                # Erstelle Comma-separated Liste
+                local ip_list
+                ip_list=$(paste -sd, "$chunk_file")
+                
+                if [ -n "$ip_list" ]; then
+                    if nft add element inet filter "$set_name" "{ $ip_list }" 2>/dev/null; then
+                        log_debug "     ✓ Chunk $chunk_count erfolgreich hinzugefügt"
+                    else
+                        log_warn "     ✗ Chunk $chunk_count fehlgeschlagen"
+                    fi
+                fi
+            fi
+        done
+        
+        # Aufräumen
+        rm -f "${chunk_prefix}"*
+        log_info "  -> $chunk_count Chunks verarbeitet"
+    else
+        # Kleine Liste - direkt hinzufügen
+        local ip_list
+        ip_list=$(paste -sd, "$ip_file")
+        
+        if [ -n "$ip_list" ]; then
+            if nft add element inet filter "$set_name" "{ $ip_list }" 2>/dev/null; then
+                log_debug "Kleine Liste direkt hinzugefügt"
+            else
+                log_warn "Direkter Add für Set '$set_name' fehlgeschlagen"
+                return 1
+            fi
+        fi
+    fi
+    
+    return 0
+}
+
+##
+# Lädt persistente Allowlist-Einträge.
+##
+load_persistent_allowlist() {
+    local allowlist_v4="$1"
+    local allowlist_v6="$2"
+    
+    if [ ! -f "$ALLOWLIST_FILE" ]; then
+        log_debug "Keine persistente Allowlist gefunden ($ALLOWLIST_FILE)"
+        return 0
+    fi
+    
+    log_info "Lade persistente Allowlist-Einträge..."
+    
+    local v4_count=0
+    local v6_count=0
+    
+    while IFS= read -r line; do
+        # Überspringe leere Zeilen und Kommentare
+        [[ -z "$line" || "$line" =~ ^[[:space:]]*# ]] && continue
+        
+        # Entferne führende/nachfolgende Leerzeichen
+        line=$(echo "$line" | xargs)
+        
+        if [[ "$line" == *":"* ]]; then
+            # IPv6
+            echo "$line" >> "$allowlist_v6"
+            ((v6_count++))
+        else
+            # IPv4
+            echo "$line" >> "$allowlist_v4"
+            ((v4_count++))
+        fi
+    done < "$ALLOWLIST_FILE"
+    
+    log_info "Persistente Allowlist geladen: $v4_count IPv4, $v6_count IPv6"
+}
+
+# ═══════════════════════════════════════════════════════════════════════════
+# HAUPTLOGIK
+# ═══════════════════════════════════════════════════════════════════════════
+
+##
+# Hauptfunktion des Update-Prozesses.
+##
+main() {
+    log_info "🌍 GeoIP Set-Update v$VERSION gestartet"
+    
+    # Basis-Checks
+    check_dependencies
+    check_configuration
+    
+    # Konfiguration laden
+    local countries_to_block
+    countries_to_block=$(cat "$COUNTRIES_FILE" 2>/dev/null | tr '\n' ' ' | xargs)
+    local home_country
+    home_country=$(cat "$HOME_COUNTRY_FILE" 2>/dev/null | xargs)
+    
+    log_info "Konfiguration geladen:"
+    log_info "  Blockierte Länder: ${countries_to_block:-'Keine'}"
+    log_info "  Heimatland: ${home_country:-'Nicht gesetzt'}"
+    
+    if [ -z "$countries_to_block" ] && [ -z "$home_country" ]; then
+        log_warn "Keine Länder konfiguriert. Update wird beendet."
+        exit 0
+    fi
+    
+    # Temporäre Dateien erstellen
+    local temp_blocked_v4 temp_blocked_v6 temp_home_v4 temp_home_v6
+    local temp_allowlist_v4 temp_allowlist_v6
+    
+    temp_blocked_v4=$(mktemp)
+    temp_blocked_v6=$(mktemp)
+    temp_home_v4=$(mktemp)
+    temp_home_v6=$(mktemp)
+    temp_allowlist_v4=$(mktemp)
+    temp_allowlist_v6=$(mktemp)
+    
+    # Cleanup-Trap setzen
+    trap 'rm -f "$temp_blocked_v4" "$temp_blocked_v6" "$temp_home_v4" "$temp_home_v6" "$temp_allowlist_v4" "$temp_allowlist_v6"' EXIT
+    
+    # Downloads parallel starten (IPv4 und IPv6)
+    local download_success=true
+    
+    if [ -n "$countries_to_block" ]; then
+        log_info "📥 Lade Blocklisten..."
+        if ! download_countries_batch "$countries_to_block" "$temp_blocked_v4" "v4"; then
+            log_warn "IPv4-Blocklisten konnten nicht vollständig geladen werden"
+            download_success=false
+        fi
+        download_countries_batch "$countries_to_block" "$temp_blocked_v6" "v6" || true  # IPv6 ist optional
+    fi
+    
+    if [ -n "$home_country" ]; then
+        log_info "🏠 Lade Heimatland-Listen..."
+        if ! download_countries_batch "$home_country" "$temp_home_v4" "v4"; then
+            log_warn "IPv4-Heimatland-Listen konnten nicht geladen werden"
+            download_success=false
+        fi
+        download_countries_batch "$home_country" "$temp_home_v6" "v6" || true  # IPv6 ist optional
+    fi
+    
+    # Persistente Allowlist laden
+    load_persistent_allowlist "$temp_allowlist_v4" "$temp_allowlist_v6"
+    
+    # Prüfe ob mindestens ein Download erfolgreich war
+    if [ "$download_success" = "false" ]; then
+        log_error "Kritische Downloads fehlgeschlagen! Update wird abgebrochen."
+        exit 1
+    fi
+    
+    # === ATOMISCHES UPDATE DER SETS ===
+    log_info "🔄 Aktualisiere NFTables-Sets (atomisch)..."
+    
+    # 1. Alle Sets leeren
+    log_info "Leere bestehende Sets..."
+    for set_name in geoip_blocked_v4 geoip_blocked_v6 geoip_home_v4 geoip_home_v6 geoip_allowlist_v4 geoip_allowlist_v6; do
+        if nft flush set inet filter "$set_name" 2>/dev/null; then
+            log_debug "Set '$set_name' geleert"
+        else
+            log_warn "Konnte Set '$set_name' nicht leeren"
+        fi
+    done
+    
+    # 2. Neue Daten mit Chunking einfügen
+    log_info "Fülle Sets mit neuen Daten..."
+    
+    local update_errors=0
+    
+    # Blockierte IPs
+    add_elements_in_chunks "geoip_blocked_v4" "$temp_blocked_v4" || ((update_errors++))
+    add_elements_in_chunks "geoip_blocked_v6" "$temp_blocked_v6" || ((update_errors++))
+    
+    # Heimatland-IPs
+    add_elements_in_chunks "geoip_home_v4" "$temp_home_v4" || ((update_errors++))
+    add_elements_in_chunks "geoip_home_v6" "$temp_home_v6" || ((update_errors++))
+    
+    # Allowlist-IPs
+    add_elements_in_chunks "geoip_allowlist_v4" "$temp_allowlist_v4" || ((update_errors++))
+    add_elements_in_chunks "geoip_allowlist_v6" "$temp_allowlist_v6" || ((update_errors++))
+    
+    # === FINALE STATISTIKEN ===
+    log_info "📊 Sammle finale Statistiken..."
+    
+    local final_stats=""
+    for set_name in geoip_blocked_v4 geoip_blocked_v6 geoip_home_v4 geoip_home_v6 geoip_allowlist_v4 geoip_allowlist_v6; do
+        local count=$(nft list set inet filter "$set_name" 2>/dev/null | grep -c "^[[:space:]]*[0-9a-f:]" || echo "0")
+        final_stats+="$set_name=$count "
+        log_debug "Set '$set_name': $count Einträge"
+    done
+    
+    # === ABSCHLUSS-BEWERTUNG ===
+    if [ "$update_errors" -eq 0 ]; then
+        log_ok "🎉 GeoIP Set-Update erfolgreich abgeschlossen!"
+        log_info "Finale Set-Größen: $final_stats"
+        
+        # Erfolgs-Statistik ins Journal
+        if command -v logger &>/dev/null; then
+            logger -t "$LOG_TAG" -p "daemon.notice" "UPDATE_SUCCESS: $final_stats"
+        fi
+        
+        exit 0
+    else
+        log_error "❌ GeoIP Set-Update mit $update_errors Fehlern abgeschlossen!"
+        log_warn "Einige Sets konnten nicht korrekt aktualisiert werden."
+        
+        # Fehler-Info ins Journal
+        if command -v logger &>/dev/null; then
+            logger -t "$LOG_TAG" -p "daemon.err" "UPDATE_ERRORS: $update_errors errors during update"
+        fi
+        
+        exit 1
+    fi
+}
+
+# ═══════════════════════════════════════════════════════════════════════════
+# SCRIPT-START
+# ═══════════════════════════════════════════════════════════════════════════
+
+# Prüfe ob als root ausgeführt (für NFTables-Operationen erforderlich)
+if [ "$EUID" -ne 0 ]; then
+    log_error "Dieses Script muss als root ausgeführt werden!"
+    log_info "Verwendung: sudo $0"
+    exit 1
+fi
+
+# Starte Hauptfunktion
+main "$@"
