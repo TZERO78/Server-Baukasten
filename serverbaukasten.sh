@@ -33,9 +33,7 @@ readonly CROWDSEC_MAXRETRY_DEFAULT=5
 readonly CROWDSEC_BANTIME_DEFAULT="48h" 
 readonly SSH_PORT_DEFAULT=22
 readonly NOTIFICATION_EMAIL_DEFAULT="admin@example.com"  # Generic für Community
-
-# ENTFERNT (Legacy/Unused):
-# readonly GEOIP_NFT_INCLUDE_FILE="/etc/nftables.d/geoip.nft"
+readonly COMPONENTS_BASE_URL="https://raw.githubusercontent.com/TZERO78/Server-Baukasten/main/components"
 
 # Globale Verbose/Debug-Variablen
 declare -g SCRIPT_VERBOSE=false
@@ -2511,11 +2509,15 @@ EOF
 # MODUL 2: Führt die grundlegende Systemkonfiguration durch.
 # Setzt Hostname, Zeitzone, Locale, Benutzer, Passwörter und installiert Kernpakete.
 ##
+##
+# MODUL 2: Führt die grundlegende Systemkonfiguration durch.
+# Setzt Hostname, Zeitzone, Locale, Benutzer, Passwörter und installiert Kernpakete.
+##
 module_base() {
     log_info "📦 MODUL: Basis-System-Setup"
     
-    # --- Phase 1/6: System-Identität ---
-    log_info "  -> 1/6: Konfiguriere System-Identität..."
+    # --- Phase 1/7: System-Identität ---
+    log_info "  -> 1/7: Konfiguriere System-Identität..."
     hostnamectl set-hostname "$SERVER_HOSTNAME"
     sed -i "/127.0.1.1/c\127.0.1.1       $SERVER_HOSTNAME" /etc/hosts
     log_ok "Hostname gesetzt auf: $SERVER_HOSTNAME"
@@ -2529,8 +2531,8 @@ module_base() {
     update-locale LANG="$LOCALE"
     log_ok "System-Locale gesetzt auf: $LOCALE"
     
-    # --- Phase 2/6: Benutzer-Management ---
-    log_info "  -> 2/6: Konfiguriere Benutzer-Accounts..."
+    # --- Phase 2/7: Benutzer-Management ---
+    log_info "  -> 2/7: Konfiguriere Benutzer-Accounts..."
     echo "root:$ROOT_PASSWORD" | chpasswd
     log_ok "Root-Passwort aktualisiert."
     
@@ -2549,8 +2551,8 @@ module_base() {
     chmod 0440 "/etc/sudoers.d/99-$ADMIN_USER"
     log_warn "Temporäre NOPASSWD sudo-Rechte für '$ADMIN_USER' aktiviert (werden am Ende entfernt)."
     
-    # --- Phase 3/6: Kern-Pakete ---
-    log_info "  -> 3/6: Installiere Kern-Pakete..."
+    # --- Phase 3/7: Kern-Pakete ---
+    log_info "  -> 3/7: Installiere Kern-Pakete..."
     export DEBIAN_FRONTEND=noninteractive
     readonly APT_OPTIONS="-y -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold"
     
@@ -2575,18 +2577,18 @@ module_base() {
         log_warn "Installation der AppArmor-Profile übersprungen (Timeout)."
     fi
 
-    # --- Phase 4/6: Mail-System Konfiguration ---
+    # --- Phase 4/7: Mail-System Konfiguration ---
     if [ "$ENABLE_SYSTEM_MAIL" = "ja" ]; then
-        log_info "  -> 4/6: Konfiguriere Mail-System..."
+        log_info "  -> 4/7: Konfiguriere Mail-System..."
         update-alternatives --install /usr/sbin/sendmail sendmail /usr/bin/msmtp 25
         update-alternatives --set sendmail /usr/bin/msmtp
         log_ok "msmtp als systemweite sendmail-Alternative konfiguriert."
     else
-        log_info "  -> 4/6: Mail-System-Konfiguration übersprungen (deaktiviert)."
+        log_info "  -> 4/7: Mail-System-Konfiguration übersprungen (deaktiviert)."
     fi
     
-    # --- Phase 5/6: Swap-Konfiguration ---
-    log_info "  -> 5/6: Konfiguriere Swap-Speicher..."
+    # --- Phase 5/7: Swap-Konfiguration ---
+    log_info "  -> 5/7: Konfiguriere Swap-Speicher..."
     if ! swapon --show | grep -q /swapfile; then
         run_with_spinner "Erstelle 2GB Swap-Datei..." \
             "fallocate -l 2G /swapfile && chmod 600 /swapfile && mkswap /swapfile && swapon /swapfile"
@@ -2595,9 +2597,9 @@ module_base() {
         log_info "Swap-Datei existiert bereits."
     fi
     
-    # --- Phase 6/6: Docker-Setup (falls Container-Server) ---
+    # --- Phase 6/7: Docker-Setup (falls Container-Server) ---
     if [ "$SERVER_ROLE" = "1" ]; then
-        log_info "  -> 6/6: Installiere Docker-Engine..."
+        log_info "  -> 6/7: Installiere Docker-Engine..."
         
         install -m 0755 -d /etc/apt/keyrings
         if [ ! -f /etc/apt/keyrings/docker.gpg ]; then
@@ -2620,10 +2622,43 @@ module_base() {
         systemctl disable --now docker >/dev/null 2>&1 || true
         log_info "Docker-Engine installiert (Service wird später konfiguriert)."
     else
-        log_info "  -> 6/6: Docker-Setup übersprungen (Einfacher Server)."
+        log_info "  -> 6/7: Docker-Setup übersprungen (Einfacher Server)."
     fi
 
-    log_ok "Modul Basis-System-Setup erfolgreich abgeschlossen."
+    # --- Phase 7/7: Modulare Komponenten bereitstellen ---
+    log_info "  -> 7/7: Stelle benötigte modulare Komponenten bereit..."
+    
+    # GeoIP-Komponenten (falls aktiviert)
+    if [ "${ENABLE_GEOIP_BLOCKING:-nein}" = "ja" ]; then
+        log_info "     -> GeoIP-Komponenten..."
+        
+        # geoip-manager installieren
+        if run_with_spinner "Download geoip-manager..." "curl -fsSL '$COMPONENTS_BASE_URL/geoip-manager' -o '/usr/local/bin/geoip-manager'"; then
+            chmod 770 "/usr/local/bin/geoip-manager"
+            chown root:sudo "/usr/local/bin/geoip-manager"
+        else
+            log_error "geoip-manager Download fehlgeschlagen!"
+        fi
+        
+        # update-geoip-sets.sh installieren
+        if run_with_spinner "Download update-geoip-sets.sh..." "curl -fsSL '$COMPONENTS_BASE_URL/update-geoip-sets.sh' -o '/usr/local/bin/update-geoip-sets.sh'"; then
+            chmod 770 "/usr/local/bin/update-geoip-sets.sh"
+            chown root:sudo "/usr/local/bin/update-geoip-sets.sh"
+        else
+            log_error "update-geoip-sets.sh Download fehlgeschlagen!"
+        fi
+    fi
+    
+    # Weitere Komponenten direkt hier hinzufügen:
+    # if [ "$SERVER_ROLE" = "1" ]; then
+    #     log_info "     -> Docker-Komponenten..."
+    #     if run_with_spinner "Download docker-setup.sh..." "curl -fsSL '$COMPONENTS_BASE_URL/docker-setup.sh' -o '/usr/local/bin/docker-setup.sh'"; then
+    #         chmod 770 "/usr/local/bin/docker-setup.sh"
+    #         chown root:sudo "/usr/local/bin/docker-setup.sh"
+    #     fi
+    # fi
+
+   log_ok "Modul Basis-System-Setup erfolgreich abgeschlossen."  
 }
 
 ##
@@ -3744,370 +3779,6 @@ EOF
     fi
 }
 
-################################################################################
-#                                 
-#                               GEOIP-BLOCKING                                 
-#
-################################################################################
-# ===============================================================================
-#  GeoIP-Update-Skript erstellen (v1.0 - Set-basiert mit Chunking)
-# ===============================================================================
-create_geoip_update_script() {
-    log_info "Erstelle GeoIP-Update-Skript (Set-Befüller mit Chunking)..."
-    
-    # Nutze 'EOF', um die Expansion von Variablen zu verhindern.
-    # So wird der Code exakt so in die Zieldatei geschrieben.
-    cat > /usr/local/bin/update-geoip-sets.sh << 'EOF'
-#!/bin/bash
-# GeoIP Set Updater v1.0
-# Lädt IP-Listen und befüllt die persistenten nftables-Sets.
-# Inklusive Chunking für sehr große Listen, um ARG_MAX Limits zu umgehen.
-
-set -euo pipefail
-
-# --- Konfiguration ---
-readonly LOG_TAG="geoip-update"
-readonly COUNTRIES_FILE="/etc/geoip-countries.conf"
-readonly HOME_COUNTRY_FILE="/etc/geoip-home-country.conf"
-readonly CHUNK_SIZE=2000 # Elemente pro `nft add element` Aufruf
-
-# --- Logging ---
-log_info() { logger -t "$LOG_TAG" -p "daemon.info" "$*"; echo "[INFO] $*" >&2; }
-log_error() { logger -t "$LOG_TAG" -p "daemon.err" "$*"; echo "[ERROR] $*" >&2; }
-log_debug() { if [ "${DEBUG:-false}" = true ]; then echo -e "[DEBUG] $*" >&2; fi; }
-
-# --- Download-Helfer ---
-download_country_ips() {
-    local country="$1"
-    local output_file="$2"
-    local ip_version="${3:-v4}"
-    local url=""
-    local country_lower
-
-    country_lower=$(echo "$country" | tr '[:upper:]' '[:lower:]')
-
-    if [ "$ip_version" = "v6" ]; then
-        url="https://www.ipdeny.com/ipv6/ipaddresses/blocks/${country_lower}.zone"
-    else
-        url="https://www.ipdeny.com/ipblocks/data/countries/${country_lower}.zone"
-    fi
-
-    local http_code
-    http_code=$(curl -L -s -w "%{http_code}" --max-time 60 --connect-timeout 15 -o "$output_file" "$url")
-    
-    if [ "$http_code" -eq 200 ] && [ -s "$output_file" ]; then
-        return 0
-    else
-        # Bei IPv6 ist ein Fehlschlag oft normal (nicht jedes Land hat Blöcke) und kein kritischer Fehler
-        [ "$ip_version" = "v6" ] && return 1
-        log_error "Download für $country (IPv4) fehlgeschlagen (HTTP-Code: $http_code)"
-        return 1
-    fi
-}
-
-# --- Chunking-Helfer ---
-add_elements_in_chunks() {
-    local set_name="$1"
-    local ip_file="$2"
-    
-    if [ ! -s "$ip_file" ]; then
-        return # Überspringen, wenn die IP-Datei leer ist
-    fi
-    
-    local line_count
-    line_count=$(wc -l < "$ip_file")
-    
-    log_info "Füge $line_count Einträge zu Set '$set_name' hinzu..."
-    
-    if [ "$line_count" -gt "$CHUNK_SIZE" ]; then
-        log_info "  -> Liste zu groß, aktiviere Chunking ($CHUNK_SIZE pro Block)..."
-        local chunk_prefix
-        chunk_prefix=$(mktemp -u /tmp/geoip_chunk_XXXXXX)
-        split -l "$CHUNK_SIZE" "$ip_file" "$chunk_prefix"
-        
-        for chunk_file in "${chunk_prefix}"*; do
-            log_debug "  -> Verarbeite Chunk $(basename "$chunk_file")..."
-            nft add element inet filter "$set_name" "{ $(paste -sd, "$chunk_file") }"
-        done
-        
-        rm -f "${chunk_prefix}"*
-    else
-        nft add element inet filter "$set_name" "{ $(paste -sd, "$ip_file") }"
-    fi
-}
-
-# --- Hauptlogik ---
-main() {
-    log_info "Starte GeoIP Set-Update (v8.1 mit Chunking)..."
-    
-    local countries_to_block
-    countries_to_block=$(cat "$COUNTRIES_FILE" 2>/dev/null || echo "")
-    local home_country
-    home_country=$(cat "$HOME_COUNTRY_FILE" 2>/dev/null || echo "")
-    
-    if [ -z "$countries_to_block" ] && [ -z "$home_country" ]; then
-        log_info "Keine Länder konfiguriert. Beende Update."
-        exit 0
-    fi
-
-    local TMP_BLOCKED; TMP_BLOCKED=$(mktemp)
-    local TMP_HOME; TMP_HOME=$(mktemp)
-    trap 'rm -f "$TMP_BLOCKED" "$TMP_HOME"' EXIT
-
-    # 1. Alle IPs für blockierte Länder sammeln
-    log_info "Lade Blocklisten für: ${countries_to_block}..."
-    for country in $countries_to_block; do
-        [ "$country" = "$home_country" ] && continue
-        local tmp_v4; tmp_v4=$(mktemp)
-        local tmp_v6; tmp_v6=$(mktemp)
-        download_country_ips "$country" "$tmp_v4" "v4" && cat "$tmp_v4" >> "$TMP_BLOCKED"
-        download_country_ips "$country" "$tmp_v6" "v6" && cat "$tmp_v6" >> "$TMP_BLOCKED"
-        rm -f "$tmp_v4" "$tmp_v6"
-    done
-    
-    # 2. Alle IPs für das Heimatland sammeln
-    if [ -n "$home_country" ]; then
-        log_info "Lade Allowlist für Heimatland: $home_country..."
-        local tmp_v4; tmp_v4=$(mktemp)
-        local tmp_v6; tmp_v6=$(mktemp)
-        download_country_ips "$home_country" "$tmp_v4" "v4" && cat "$tmp_v4" >> "$TMP_HOME"
-        download_country_ips "$home_country" "$tmp_v6" "v6" && cat "$tmp_v6" >> "$TMP_HOME"
-        rm -f "$tmp_v4" "$tmp_v6"
-    fi
-
-    # 3. Temporäre, aufgeteilte Listen für das finale Update
-    local all_blocked_v4; all_blocked_v4=$(mktemp)
-    local all_blocked_v6; all_blocked_v6=$(mktemp)
-    local all_home_v4; all_home_v4=$(mktemp)
-    local all_home_v6; all_home_v6=$(mktemp)
-    trap 'rm -f "$TMP_BLOCKED" "$TMP_HOME" "$all_blocked_v4" "$all_blocked_v6" "$all_home_v4" "$all_home_v6"' EXIT
-    
-    grep -v ':' "$TMP_BLOCKED" > "$all_blocked_v4"
-    grep ':' "$TMP_BLOCKED" > "$all_blocked_v6"
-    grep -v ':' "$TMP_HOME" > "$all_home_v4"
-    grep ':' "$TMP_HOME" > "$all_home_v6"
-    
-    # --- ATOMARES UPDATE DER SETS ---
-    log_info "Aktualisiere nftables Sets..."
-    
-    # 4. Leere die alten Sets.
-    nft flush set inet filter geoip_blocked_v4
-    nft flush set inet filter geoip_blocked_v6
-    nft flush set inet filter geoip_home_v4
-    nft flush set inet filter geoip_home_v6
-    log_info "Alle GeoIP-Sets geleert."
-
-    # 5. Befülle alle vier Sets mit der robusten Chunking-Funktion.
-    add_elements_in_chunks "geoip_blocked_v4" "$all_blocked_v4"
-    add_elements_in_chunks "geoip_blocked_v6" "$all_blocked_v6"
-    add_elements_in_chunks "geoip_home_v4" "$all_home_v4"
-    add_elements_in_chunks "geoip_home_v6" "$all_home_v6"
-    
-    log_info "🎉 GeoIP Set-Update erfolgreich abgeschlossen!"
-    exit 0
-}
-
-# Skript ausführen
-main "$@"
-EOF
-
-    chmod +x /usr/local/bin/update-geoip-sets.sh
-    log_ok "GeoIP-Update-Skript (mit Chunking) erstellt."
-}
-
-# ===============================================================================
-#                GEOIP-MANAGEMENT-TOOL ERSTELLEN (define-Ansatz)
-# ===============================================================================
-# ===============================================================================
-#  Mächtiges GeoIP-Management-Tool erstellen (v1.0 - Final)
-# ===============================================================================
-create_geoip_manager_script() {
-    log_info "Erstelle mächtiges GeoIP-Management-Tool..."
-    
-    cat > /usr/local/bin/geoip-manager << 'EOF'
-#!/bin/bash
-# GeoIP Management Tool v1.0
-# Interaktives Werkzeug zur Verwaltung des Set-basierten GeoIP-Blockings.
-
-set -eo pipefail
-
-# --- Konfiguration & Variablen ---
-readonly COUNTRIES_FILE="/etc/geoip-countries.conf"
-readonly HOME_COUNTRY_FILE="/etc/geoip-home-country.conf"
-readonly ALLOWLIST_FILE="/etc/geoip-allowlist.conf"
-readonly UPDATE_SCRIPT="/usr/local/bin/update-geoip-sets.sh"
-readonly LOG_TAG="geoip-manager"
-
-# Farben und Logging
-RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; BLUE='\033[0;34m'
-CYAN='\033[0;36m'; NC='\033[0m'
-log_info() { echo -e "${CYAN}›${NC} $*"; }
-log_ok() { echo -e "${GREEN}✅ $*${NC}"; }
-log_warn() { echo -e "${YELLOW}⚠️  $*${NC}"; }
-log_error() { echo -e "${RED}❌ $*${NC}" >&2; }
-
-# --- Helper-Funktionen ---
-
-# Erkennt den Zustand der Firewall-Integration
-# In /usr/local/bin/geoip-manager
-detect_geoip_chain_status() {
-    # 1. KRITISCHER FEHLER: Existiert die Chain überhaupt?
-    if ! sudo nft list chain inet filter geoip_check >/dev/null 2>&1; then
-        echo "missing"
-        return
-    fi
-    
-    # 2. KRITISCHER FEHLER: Ist die Chain in die Firewall eingebunden?
-    local has_jump=false
-    if sudo nft -j list chain inet filter input 2>/dev/null | jq -e '
-        .nftables[].rule? | 
-        select(
-            .comment? == "GeoIP-Filter" and 
-            (.expr?[] | .jump.target? == "geoip_check")
-        )' >/dev/null 2>&1; then
-        has_jump=true
-    fi
-        
-    # 3. ZUSTANDSANALYSE: Prüfe die Summe der IPs in den Sets
-    local stats
-    stats=($(get_set_stats))
-    local total_ips=$(( ${stats[0]} + ${stats[1]} + ${stats[2]} + ${stats[3]} ))
-    
-    # Wenn mehr als eine Handvoll IPs geladen sind, ist das System aktiv.
-    if [ "$total_ips" -gt 10 ]; then
-        echo "active"
-    else
-        echo "empty_sets"
-    fi
-}
-
-# Zählt die IPs in den Sets
-get_set_stats() {
-    local home_v4=$(nft list set inet filter geoip_home_v4 2>/dev/null | grep -v '{' | wc -l)
-    local home_v6=$(nft list set inet filter geoip_home_v6 2>/dev/null | grep -v '{' | wc -l)
-    local blocked_v4=$(nft list set inet filter geoip_blocked_v4 2>/dev/null | grep -v '{' | wc -l)
-    local blocked_v6=$(nft list set inet filter geoip_blocked_v6 2>/dev/null | grep -v '{' | wc -l)
-    echo "$home_v4 $home_v6 $blocked_v4 $blocked_v6"
-}
-
-# --- Befehls-Funktionen ---
-
-show_status() {
-    echo -e "${BLUE}=== GeoIP-Blocking Status (Set-basiert) ===${NC}\n"
-    
-    # Konfiguration
-    local blocked=$(cat "$COUNTRIES_FILE" 2>/dev/null || echo 'Nicht konfiguriert')
-    local home=$(cat "$HOME_COUNTRY_FILE" 2>/dev/null || echo 'Nicht gesetzt')
-    echo -e "${CYAN}Blockierte Länder:${NC} $blocked"
-    echo -e "${GREEN}Heimatland (geschützt):${NC} $home\n"
-    
-    # Service-Status
-    echo -e "${BLUE}--- Service & Automatisierung ---${NC}"
-    if systemctl is-active --quiet geoip-update.timer; then
-        local next_run=$(systemctl list-timers geoip-update.timer --no-pager | awk 'NR==2 {print $1, $2}')
-        echo -e "Update-Timer: ${GREEN}Aktiv${NC} (Nächster Lauf: $next_run)"
-    else
-        echo -e "Update-Timer: ${RED}Inaktiv${NC}"
-    fi
-    local last_run=$(journalctl -t geoip-update -n 1 --output=short-precise | head -1 | cut -d' ' -f1-3 || echo "Nie")
-    echo -e "Letzter Lauf: ${CYAN}$last_run${NC}\n"
-
-    # NFTables-Status
-    echo -e "${BLUE}--- Firewall-Integration & Inhalte ---${NC}"
-    local chain_status=$(detect_geoip_chain_status)
-    local stats=($(get_set_stats))
-    
-    case "$chain_status" in
-        "missing")
-            log_error "GeoIP-Chain fehlt! System ist nicht korrekt installiert."
-            return 1 ;;
-        "unintegrated")
-            log_warn "GeoIP-Chain ist nicht in der Firewall aktiv (jump-Regel fehlt)!" ;;
-        "empty_sets")
-            log_warn "GeoIP-Sets sind leer. Führe 'geoip-manager update' aus." ;;
-        "active")
-            echo -e "Firewall-Integration: ${GREEN}✅ Aktiv und integriert${NC}" ;;
-    esac
-
-    echo -e "Heimatland IPs: ${GREEN}${stats[0]} (v4), ${stats[1]} (v6)${NC}"
-    echo -e "Blockierte IPs: ${RED}${stats[2]} (v4), ${stats[3]} (v6)${NC}"
-}
-
-test_ip() {
-    local ip_to_test="$1"
-    [ -z "$ip_to_test" ] && { log_error "Bitte eine IP-Adresse zum Testen angeben."; exit 1; }
-    log_info "Trace für IP '$ip_to_test' auf einem TCP Port..."
-    if [[ "$ip_to_test" == *":"* ]]; then
-        nft trace inet filter input ip6 saddr "$ip_to_test" ip6 nexthdr tcp tcp dport 443
-    else
-        nft trace inet filter input ip saddr "$ip_to_test" ip protocol tcp tcp dport 443
-    fi
-}
-
-allow_ip() {
-    local ip_to_allow="$1"
-    [ -z "$ip_to_allow" ] && { log_error "Bitte IP-Adresse für die Allowlist angeben."; exit 1; }
-    if [[ "$ip_to_allow" == *":"* ]]; then
-        nft add element inet filter geoip_allowlist_v6 { "$ip_to_allow" }
-    else
-        nft add element inet filter geoip_allowlist_v4 { "$ip_to_allow" }
-    fi
-    grep -qxF "$ip_to_allow" "$ALLOWLIST_FILE" || echo "$ip_to_allow" >> "$ALLOWLIST_FILE"
-    log_ok "IP $ip_to_allow wurde zur manuellen Allowlist hinzugefügt."
-}
-
-show_hits() {
-    echo -e "${BLUE}--- GeoIP Traffic-Statistiken (seit letztem Reboot) ---${NC}"
-    local chain_content=$(nft -a list chain inet filter geoip_check)
-    
-    # Extrahiere die Zählerstände über die stabilen Kommentare
-    while read -r comment; do
-        local stats=$(echo "$chain_content" | grep "$comment" | awk '{printf "Pakete: %s, Volumen: %s %s", $7, $9, $10}')
-        local color=$GREEN
-        [[ "$comment" =~ Block ]] && color=$RED
-        printf "%-28s: %b\n" "$comment" "${color}${stats}${NC}"
-    done << EOH
-Manual-Allow-v4
-Manual-Allow-v6
-GeoIP-Allow-Home-v4
-GeoIP-Allow-Home-v6
-GeoIP-Block-v4
-GeoIP-Block-v6
-EOH
-}
-
-show_help() {
-    echo -e "${BLUE}GeoIP Management Tool {NC}"
-    echo "Ein Werkzeug zur Steuerung des Set-basierten GeoIP-Blockings."
-    echo
-    echo -e "${CYAN}Verwendung:${NC}"
-    echo "  geoip-manager status          - Zeigt den Gesamtstatus des Systems an."
-    echo "  geoip-manager update          - Startet ein manuelles Update der IP-Listen."
-    echo "  geoip-manager hits            - Zeigt Paket-Zähler für die GeoIP-Regeln."
-    echo "  geoip-manager test <IP>       - Simuliert, wie die Firewall eine IP behandelt."
-    echo "  geoip-manager allow <IP/CIDR> - Fügt eine IP/Netz zur manuellen Whitelist hinzu."
-    echo "  geoip-manager logs [Anzahl]   - Zeigt die letzten Log-Einträge des Updates."
-    echo "  geoip-manager help            - Zeigt diese Hilfe an."
-    echo
-}
-
-# --- HAUPTLOGIK (CASE-BLOCK) ---
-case "${1:-status}" in
-    status) show_status ;;
-    update) log_info "Manuelles Update wird gestartet..."; sudo "$UPDATE_SCRIPT" ;;
-    hits) show_hits ;;
-    test) test_ip "$2" ;;
-    allow) allow_ip "$2" ;;
-    logs) shift; sudo journalctl -t "$LOG_TAG" -n "${1:-50}" --no-pager --output=cat ;;
-    help|--help|-h) show_help ;;
-    *) log_error "Unbekannter Befehl: $1"; show_help; exit 1 ;;
-esac
-EOF
-    
-    chmod +x /usr/local/bin/geoip-manager
-    log_ok "Mächtiges GeoIP-Management-Tool erstellt."
-}
-
 # ===============================================================================
 #  GeoIP Konfigurationsdateien sicher erstellen
 # ===============================================================================
@@ -4174,10 +3845,8 @@ EOF
 install_geoip_blocking() {
     log_info "🚀 Installiere GeoIP-Blocking (nutzt vordefinierte Sets)..."
     
-    # 1. Hilfsskripte und Konfigs erstellen
+    # 1. Konfigs erstellen
     create_geoip_config_files
-    create_geoip_update_script
-    create_geoip_manager_script
     create_geoip_systemd_timer
     
     # 2. Sets müssen nicht mehr erstellt werden, da sie in nftables.conf stehen.
