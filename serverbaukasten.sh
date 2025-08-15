@@ -2641,11 +2641,11 @@ module_base() {
         fi
         
         # update-geoip-sets.sh installieren
-        if run_with_spinner "Download update-geoip-sets.sh..." "curl -fsSL '$COMPONENTS_BASE_URL/update-geoip-sets.sh' -o '/usr/local/bin/update-geoip-sets.sh'"; then
-            chmod 770 "/usr/local/bin/update-geoip-sets.sh"
-            chown root:sudo "/usr/local/bin/update-geoip-sets.sh"
+        if run_with_spinner "Download update-geoip-sets..." "curl -fsSL '$COMPONENTS_BASE_URL/update-geoip-sets' -o '/usr/local/bin/update-geoip-sets.sh'"; then
+            chmod 770 "/usr/local/bin/update-geoip-sets"
+            chown root:sudo "/usr/local/bin/update-geoip-sets"
         else
-            log_error "update-geoip-sets.sh Download fehlgeschlagen!"
+            log_error "update-geoip-sets Download fehlgeschlagen!"
         fi
     fi
     
