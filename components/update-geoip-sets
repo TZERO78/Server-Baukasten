@@ -11,8 +11,8 @@
 # Inklusive Chunking für sehr große Listen, um ARG_MAX Limits zu umgehen.
 #
 # Verwendung:
-#   ./update-geoip-sets.sh           # Normaler Update-Lauf
-#   DEBUG=true ./update-geoip-sets.sh # Mit Debug-Ausgaben
+#   ./update-geoip-sets           # Normaler Update-Lauf
+#   DEBUG=true ./update-geoip-sets # Mit Debug-Ausgaben
 ################################################################################
 
 set -euo pipefail

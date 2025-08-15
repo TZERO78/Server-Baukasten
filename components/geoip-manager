@@ -27,7 +27,7 @@ readonly VERSION="2.0.0"
 readonly COUNTRIES_FILE="/etc/geoip-countries.conf"
 readonly HOME_COUNTRY_FILE="/etc/geoip-home-country.conf"
 readonly ALLOWLIST_FILE="/etc/geoip-allowlist.conf"
-readonly UPDATE_SCRIPT="/usr/local/bin/update-geoip-sets.sh"
+readonly UPDATE_SCRIPT="/usr/local/bin/update-geoip-sets"
 readonly LOG_TAG="geoip-manager"
 
 # Farben für bessere Lesbarkeit

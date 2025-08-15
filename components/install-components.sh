@@ -182,7 +182,7 @@ show_usage_for_component() {
             log_info "📋 Hilfe: geoip-manager help"
             ;;
         "geoip-updater")
-            log_info "📋 Verwendung: update-geoip-sets.sh"
+            log_info "📋 Verwendung: update-geoip-sets"
             log_info "📋 Hinweis: Benötigt GeoIP-Konfigurationsdateien"
             ;;
         "system-backup")

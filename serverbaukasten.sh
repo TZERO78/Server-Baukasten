@@ -2455,7 +2455,7 @@ module_cleanup() {
     rm -rf /etc/systemd/system/*.d/
     rm -f /etc/systemd/journald.conf.d/*
     # Sonstige Skripte und Konfigs
-    rm -f /etc/geoip-*.conf /usr/local/bin/{geoip-manager,update-geoip-sets.sh,system-backup}
+    rm -f /etc/geoip-*.conf /usr/local/bin/{geoip-manager,update-geoip-sets,system-backup}
     rm -f /etc/msmtprc*
     rm -f /etc/sysctl.d/99-baukasten-hardening.conf
     systemctl daemon-reload
@@ -2640,8 +2640,8 @@ module_base() {
             log_error "geoip-manager Download fehlgeschlagen!"
         fi
         
-        # update-geoip-sets.sh installieren
-        if run_with_spinner "Download update-geoip-sets..." "curl -fsSL '$COMPONENTS_BASE_URL/update-geoip-sets' -o '/usr/local/bin/update-geoip-sets.sh'"; then
+        # update-geoip-sets installieren
+        if run_with_spinner "Download update-geoip-sets..." "curl -fsSL '$COMPONENTS_BASE_URL/update-geoip-sets' -o '/usr/local/bin/update-geoip-sets'"; then
             chmod 770 "/usr/local/bin/update-geoip-sets"
             chown root:sudo "/usr/local/bin/update-geoip-sets"
         else
@@ -3817,7 +3817,7 @@ Wants=network-online.target
 
 [Service]
 Type=oneshot
-ExecStart=/usr/local/bin/update-geoip-sets.sh
+ExecStart=/usr/local/bin/update-geoip-sets
 User=root
 EOF
     
@@ -3893,7 +3893,7 @@ configure_geoip_system() {
     run_with_spinner "Aktiviere GeoIP-Update-Timer..." "systemctl daemon-reload && systemctl enable --now geoip-update.timer"
     
     # Führe das Update-Skript direkt aus, um die Sets sofort zu befüllen
-    if run_with_spinner "Führe initiales GeoIP-Update aus..." "/usr/local/bin/update-geoip-sets.sh"; then
+    if run_with_spinner "Führe initiales GeoIP-Update aus..." "/usr/local/bin/update-geoip-sets"; then
         log_ok "Erstes GeoIP-Update erfolgreich. Die Sets sind jetzt befüllt."
     else
         log_warn "Erstes GeoIP-Update fehlgeschlagen. Sets sind noch leer. Timer wird es erneut versuchen."
