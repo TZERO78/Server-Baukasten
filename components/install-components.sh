@@ -21,7 +21,7 @@ set -euo pipefail
 declare -A COMPONENTS=(
     # Format: [name]="script|dependencies|description"
     ["geoip-manager"]="geoip-manager|nftables curl|GeoIP-Management-Tool"
-    ["geoip-updater"]="update-geoip-sets.sh|nftables curl|GeoIP-Listen-Updater"
+    ["geoip-updater"]="update-geoip-sets|nftables curl|GeoIP-Listen-Updater"
     
     # Später einfach hinzufügen:
     # ["system-backup"]="system-backup.sh|systemd|System-Backup mit Rotation"
