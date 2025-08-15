@@ -889,8 +889,8 @@ setup_geoip_protection() {
         log_info "     Bereinigte Blocklist: $BLOCKED_COUNTRIES"
     fi
     
-    # Die aufgerufene Funktion `install_geoip_blocking` sollte ihr eigenes, detailliertes Logging haben.
-    install_geoip_blocking
+    # Die aufgerufene Funktion `configure_geoip_system` sollte ihr eigenes, detailliertes Logging haben.
+    configure_geoip_system
     
     # Warte auf die Erstellung der 'geoip_check'-Chain durch das Neuladen der Firewall
     local wait_cmd="
@@ -1240,7 +1240,7 @@ generate_geoip_sets_section() {
     set geoip_allowlist_v4 { type ipv4_addr; flags interval; }
     set geoip_allowlist_v6 { type ipv6_addr; flags interval; }
 
-    # GeoIP-Chain (wird von install_geoip_blocking() befüllt)
+    # GeoIP-Chain (wird von configure_geoip_system() befüllt)
     chain geoip_check {}
 GEOIP_SETS
     fi
@@ -3842,7 +3842,7 @@ EOF
 # ===============================================================================
 #  GeoIP-Blocking installieren 
 # ===============================================================================
-install_geoip_blocking() {
+configure_geoip_system() {
     log_info "🚀 Installiere GeoIP-Blocking (nutzt vordefinierte Sets)..."
     
     # 1. Konfigs erstellen
