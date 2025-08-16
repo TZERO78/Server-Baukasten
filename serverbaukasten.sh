@@ -2634,7 +2634,7 @@ module_base() {
         
         # geoip-manager installieren
         if run_with_spinner "Download geoip-manager..." "curl -fsSL '$COMPONENTS_BASE_URL/geoip-manager' -o '/usr/local/bin/geoip-manager'"; then
-            chmod 770 "/usr/local/bin/geoip-manager"
+            chmod 750 "/usr/local/bin/geoip-manager"
             chown root:sudo "/usr/local/bin/geoip-manager"
         else
             log_error "geoip-manager Download fehlgeschlagen!"
@@ -2642,7 +2642,7 @@ module_base() {
         
         # update-geoip-sets installieren
         if run_with_spinner "Download update-geoip-sets..." "curl -fsSL '$COMPONENTS_BASE_URL/update-geoip-sets' -o '/usr/local/bin/update-geoip-sets'"; then
-            chmod 770 "/usr/local/bin/update-geoip-sets"
+            chmod 750 "/usr/local/bin/update-geoip-sets"
             chown root:sudo "/usr/local/bin/update-geoip-sets"
         else
             log_error "update-geoip-sets Download fehlgeschlagen!"
