@@ -104,20 +104,22 @@ check_geoip_installation() {
 # Erkennt den aktuellen Status der GeoIP-Chain.
 ##
 detect_geoip_chain_status() {
-    # 1. Existiert die Chain?
-    if ! nft list chain inet filter geoip_check >/dev/null 2>&1; then
+    # 1. Prüfen: Existiert die geoip_check-Kette überhaupt?
+    if ! sudo nft list chain inet filter geoip_check >/dev/null 2>&1; then
         echo "missing"
         return
     fi
     
-    # 2. Ist die Chain in die Input-Chain integriert?
-    if ! nft list chain inet filter input | grep -q "jump geoip_check"; then
+    # 2. KORRIGIERTER CHECK: Ist die jump-Regel in der input-Kette vorhanden? (Jetzt mit grep)
+    if ! sudo nft list chain inet filter input | grep -q 'jump geoip_check comment "GeoIP-Filter"'; then
         echo "unintegrated"
         return
     fi
-    
-    # 3. Sind die Sets gefüllt?
-    local stats=($(get_set_stats))
+
+    # 3. Prüfen: Sind die Sets mit IPs befüllt?
+    local stats
+    stats=($(get_set_stats))
+    # Zählt die IPs in allen 4 Sets zusammen (home_v4, home_v6, blocked_v4, blocked_v6)
     local total_ips=$(( ${stats[0]} + ${stats[1]} + ${stats[2]} + ${stats[3]} ))
     
     if [ "$total_ips" -gt 10 ]; then
