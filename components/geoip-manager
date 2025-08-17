@@ -1,6 +1,6 @@
 #!/bin/bash
 ################################################################################
-# GEOIP MANAGEMENT TOOL v2.0 - STANDALONE
+# GEOIP MANAGEMENT TOOL v2.1 - STANDALONE
 #
 # @description: Eigenständiges Management-Tool für das Set-basierte GeoIP-Blocking
 # @author:      Markus F. (TZERO78) & KI-Assistenten
@@ -8,13 +8,17 @@
 #
 # ------------------------------------------------------------------------------
 # Verwendung:
-#   geoip-manager status          - Zeigt Status und Statistiken
-#   geoip-manager update          - Startet manuelles Update
-#   geoip-manager hits            - Zeigt Traffic-Statistiken
-#   geoip-manager test <IP>       - Testet IP-Behandlung
-#   geoip-manager allow <IP>      - Fügt IP zur Allowlist hinzu
-#   geoip-manager logs [Anzahl]   - Zeigt Update-Logs
-#   geoip-manager help            - Zeigt ausführliche Hilfe
+#   geoip-manager status                 - Zeigt Status und Statistiken
+#   geoip-manager update                 - Startet manuelles Update
+#   geoip-manager hits                   - Zeigt Traffic-Statistiken
+#   geoip-manager test <IP>              - Testet IP-Behandlung
+#   geoip-manager allow <IP>             - Fügt IP zur Allowlist hinzu
+#   geoip-manager country list           - Zeigt Länder-Konfiguration
+#   geoip-manager country add <CODE>     - Fügt Land zur Blockliste hinzu
+#   geoip-manager country remove <CODE>  - Entfernt Land von Blockliste
+#   geoip-manager country home <CODE>    - Setzt Heimatland
+#   geoip-manager logs [Anzahl]          - Zeigt Update-Logs
+#   geoip-manager help                   - Zeigt ausführliche Hilfe
 ################################################################################
 
 set -eo pipefail
@@ -23,7 +27,7 @@ set -eo pipefail
 # KONFIGURATION & VARIABLEN
 # ═══════════════════════════════════════════════════════════════════════════
 
-readonly VERSION="2.0.0"
+readonly VERSION="2.1.0"
 readonly COUNTRIES_FILE="/etc/geoip-countries.conf"
 readonly HOME_COUNTRY_FILE="/etc/geoip-home-country.conf"
 readonly ALLOWLIST_FILE="/etc/geoip-allowlist.conf"
@@ -41,10 +45,45 @@ CYAN='\033[0;36m'; PURPLE='\033[0;35m'; NC='\033[0m'
 # LOGGING & HELPER-FUNKTIONEN
 # ═══════════════════════════════════════════════════════════════════════════
 
-log_info() { echo -e "${CYAN}›${NC} $*"; }
-log_ok() { echo -e "${GREEN}✅ $*${NC}"; }
-log_warn() { echo -e "${YELLOW}⚠️  $*${NC}"; }
-log_error() { echo -e "${RED}❌ $*${NC}" >&2; }
+##
+# Loggt eine Informations-Meldung.
+##
+log_info() {
+    echo -e "${CYAN}[INFO]${NC} $*" >&2
+    if command -v logger &>/dev/null; then
+        logger -t "$LOG_TAG" -p "daemon.info" -- "$*"
+    fi
+}
+
+##
+# Loggt eine Erfolgs-Meldung.
+##
+log_ok() {
+    echo -e "${GREEN}[OK]${NC} $*" >&2
+    if command -v logger &>/dev/null; then
+        logger -t "$LOG_TAG" -p "daemon.notice" -- "SUCCESS: $*"
+    fi
+}
+
+##
+# Loggt eine Warnung.
+##
+log_warn() {
+    echo -e "${YELLOW}[WARN]${NC} $*" >&2
+    if command -v logger &>/dev/null; then
+        logger -t "$LOG_TAG" -p "daemon.warning" -- "WARN: $*"
+    fi
+}
+
+##
+# Loggt einen kritischen Fehler.
+##
+log_error() {
+    echo -e "${RED}[ERROR]${NC} $*" >&2
+    if command -v logger &>/dev/null; then
+        logger -t "$LOG_TAG" -p "daemon.err" -- "ERROR: $*"
+    fi
+}
 
 ##
 # Gibt einen formatierten Header aus.
@@ -173,6 +212,273 @@ get_configuration() {
 }
 
 # ═══════════════════════════════════════════════════════════════════════════
+# COUNTRY-MANAGEMENT-FUNKTIONEN
+# ═══════════════════════════════════════════════════════════════════════════
+
+##
+# Zeigt die aktuelle Länder-Konfiguration an.
+##
+show_country_config() {
+    print_header "LÄNDER-KONFIGURATION"
+    
+    local config_data=$(get_configuration)
+    local blocked_countries=$(echo "$config_data" | cut -d'|' -f1)
+    local home_country=$(echo "$config_data" | cut -d'|' -f2)
+    
+    echo -e "${GREEN}Heimatland (geschützt):${NC}"
+    echo -e "  $home_country"
+    echo
+    
+    echo -e "${RED}Blockierte Länder:${NC}"
+    if [ "$blocked_countries" = "Nicht konfiguriert" ] || [ "$blocked_countries" = "Leer" ]; then
+        echo -e "  ${YELLOW}⚠️  Keine Länder blockiert${NC}"
+    else
+        # Formatiere Länder-Liste schön
+        echo "$blocked_countries" | tr ',' '\n' | sed 's/^[[:space:]]*/  • /' | sed 's/[[:space:]]*$//'
+    fi
+    
+    echo
+    echo -e "${CYAN}Verfügbare Aktionen:${NC}"
+    echo -e "  geoip-manager country add <CODE>     - Land hinzufügen"
+    echo -e "  geoip-manager country remove <CODE>  - Land entfernen"
+    echo -e "  geoip-manager country home <CODE>    - Heimatland setzen"
+    
+    # Zeige Set-Statistiken für Kontext
+    local stats=($(get_set_stats))
+    local blocked_v4=${stats[2]:-0}
+    local blocked_v6=${stats[3]:-0}
+    echo
+    echo -e "${BLUE}Aktuelle Set-Größen: ${blocked_v4} IPv4, ${blocked_v6} IPv6${NC}"
+}
+
+##
+# Fügt ein Land zur Blockliste hinzu.
+##
+add_country_to_blocklist() {
+    local country_code="$1"
+    
+    if [ -z "$country_code" ]; then
+        log_error "Bitte einen 2-stelligen Ländercode angeben."
+        log_info "Verwendung: geoip-manager country add <LÄNDERCODE>"
+        log_info "Beispiele: geoip-manager country add RU"
+        log_info "          geoip-manager country add CN"
+        return 1
+    fi
+    
+    # Normalisiere zu Großbuchstaben
+    country_code=$(echo "$country_code" | tr '[:lower:]' '[:upper:]')
+    
+    # Validiere Format (2 Buchstaben)
+    if [[ ! "$country_code" =~ ^[A-Z]{2}$ ]]; then
+        log_error "Ungültiger Ländercode: '$country_code'"
+        log_error "Format: Genau 2 Großbuchstaben (z.B. DE, US, RU)"
+        return 1
+    fi
+    
+    print_header "LAND ZUR BLOCKLISTE HINZUFÜGEN: $country_code"
+    
+    # Prüfe ob bereits blockiert
+    if [ -f "$COUNTRIES_FILE" ]; then
+        local current_countries=$(cat "$COUNTRIES_FILE" 2>/dev/null | tr -d '\n\r')
+        if echo "$current_countries" | grep -q "\b$country_code\b"; then
+            log_warn "Land '$country_code' ist bereits in der Blockliste."
+            return 0
+        fi
+    fi
+    
+    # Prüfe ob es das Heimatland ist
+    if [ -f "$HOME_COUNTRY_FILE" ]; then
+        local home_country=$(cat "$HOME_COUNTRY_FILE" 2>/dev/null | tr -d '\n\r')
+        if [ "$country_code" = "$home_country" ]; then
+            log_error "Kann Heimatland '$country_code' nicht blockieren!"
+            log_info "Ändere zuerst das Heimatland mit: geoip-manager country home <NEUES_LAND>"
+            return 1
+        fi
+    fi
+    
+    # Füge zur Konfiguration hinzu
+    if [ -f "$COUNTRIES_FILE" ] && [ -s "$COUNTRIES_FILE" ]; then
+        # Datei existiert und ist nicht leer - hänge an
+        local current_content=$(cat "$COUNTRIES_FILE" | tr -d '\n\r')
+        echo "${current_content}${current_content:+,}${country_code}" > "$COUNTRIES_FILE"
+    else
+        # Neue Datei oder leer
+        echo "$country_code" > "$COUNTRIES_FILE"
+    fi
+    
+    log_ok "Land '$country_code' zur Blockliste hinzugefügt."
+    
+    # Starte automatisches Update
+    log_info "Starte automatisches Update der IP-Sets..."
+    if "$UPDATE_SCRIPT" >/dev/null 2>&1; then
+        local stats=($(get_set_stats))
+        log_ok "Update erfolgreich! Neue Set-Größen: ${stats[2]} IPv4, ${stats[3]} IPv6"
+    else
+        log_error "Update fehlgeschlagen! Führe manuell aus: geoip-manager update"
+        return 1
+    fi
+    
+    log_info "💡 Das Land '$country_code' wird nun automatisch blockiert."
+}
+
+##
+# Entfernt ein Land aus der Blockliste.
+##
+remove_country_from_blocklist() {
+    local country_code="$1"
+    
+    if [ -z "$country_code" ]; then
+        log_error "Bitte einen 2-stelligen Ländercode angeben."
+        log_info "Verwendung: geoip-manager country remove <LÄNDERCODE>"
+        return 1
+    fi
+    
+    # Normalisiere zu Großbuchstaben
+    country_code=$(echo "$country_code" | tr '[:lower:]' '[:upper:]')
+    
+    # Validiere Format
+    if [[ ! "$country_code" =~ ^[A-Z]{2}$ ]]; then
+        log_error "Ungültiger Ländercode: '$country_code'"
+        return 1
+    fi
+    
+    print_header "LAND AUS BLOCKLISTE ENTFERNEN: $country_code"
+    
+    # Prüfe ob Datei existiert
+    if [ ! -f "$COUNTRIES_FILE" ]; then
+        log_warn "Blockliste-Datei '$COUNTRIES_FILE' nicht gefunden."
+        log_info "Keine Länder sind derzeit blockiert."
+        return 0
+    fi
+    
+    # Prüfe ob Land in der Liste ist
+    local current_countries=$(cat "$COUNTRIES_FILE" 2>/dev/null | tr -d '\n\r')
+    if ! echo "$current_countries" | grep -q "\b$country_code\b"; then
+        log_warn "Land '$country_code' ist nicht in der Blockliste."
+        log_info "Aktuelle Blockliste: $current_countries"
+        return 0
+    fi
+    
+    # Entferne das Land aus der Liste
+    local new_countries=$(echo "$current_countries" | sed "s/\b$country_code\b//g" | sed 's/,,*/,/g' | sed 's/^,//;s/,$//')
+    
+    # Schreibe neue Liste
+    if [ -n "$new_countries" ]; then
+        echo "$new_countries" > "$COUNTRIES_FILE"
+        log_ok "Land '$country_code' aus Blockliste entfernt."
+    else
+        # Liste ist leer geworden
+        echo "" > "$COUNTRIES_FILE"
+        log_ok "Land '$country_code' entfernt. Blockliste ist jetzt leer."
+    fi
+    
+    # Starte automatisches Update
+    log_info "Starte automatisches Update der IP-Sets..."
+    if "$UPDATE_SCRIPT" >/dev/null 2>&1; then
+        local stats=($(get_set_stats))
+        log_ok "Update erfolgreich! Neue Set-Größen: ${stats[2]} IPv4, ${stats[3]} IPv6"
+    else
+        log_error "Update fehlgeschlagen! Führe manuell aus: geoip-manager update"
+        return 1
+    fi
+    
+    log_info "💡 Das Land '$country_code' wird nicht mehr blockiert."
+}
+
+##
+# Setzt das Heimatland (geschütztes Land).
+##
+set_home_country() {
+    local country_code="$1"
+    
+    if [ -z "$country_code" ]; then
+        log_error "Bitte einen 2-stelligen Ländercode angeben."
+        log_info "Verwendung: geoip-manager country home <LÄNDERCODE>"
+        log_info "Beispiel: geoip-manager country home DE"
+        return 1
+    fi
+    
+    # Normalisiere zu Großbuchstaben
+    country_code=$(echo "$country_code" | tr '[:lower:]' '[:upper:]')
+    
+    # Validiere Format
+    if [[ ! "$country_code" =~ ^[A-Z]{2}$ ]]; then
+        log_error "Ungültiger Ländercode: '$country_code'"
+        return 1
+    fi
+    
+    print_header "HEIMATLAND SETZEN: $country_code"
+    
+    # Prüfe aktuelles Heimatland
+    if [ -f "$HOME_COUNTRY_FILE" ]; then
+        local current_home=$(cat "$HOME_COUNTRY_FILE" 2>/dev/null | tr -d '\n\r')
+        if [ "$country_code" = "$current_home" ]; then
+            log_info "Land '$country_code' ist bereits das Heimatland."
+            return 0
+        fi
+        log_info "Ändere Heimatland von '$current_home' zu '$country_code'"
+    fi
+    
+    # Entferne aus Blockliste falls vorhanden
+    if [ -f "$COUNTRIES_FILE" ]; then
+        local current_blocked=$(cat "$COUNTRIES_FILE" 2>/dev/null | tr -d '\n\r')
+        if echo "$current_blocked" | grep -q "\b$country_code\b"; then
+            log_info "Entferne '$country_code' automatisch aus der Blockliste..."
+            remove_country_from_blocklist "$country_code" >/dev/null 2>&1
+        fi
+    fi
+    
+    # Setze neues Heimatland
+    echo "$country_code" > "$HOME_COUNTRY_FILE"
+    log_ok "Heimatland auf '$country_code' gesetzt."
+    
+    # Starte automatisches Update
+    log_info "Starte automatisches Update der IP-Sets..."
+    if "$UPDATE_SCRIPT" >/dev/null 2>&1; then
+        local stats=($(get_set_stats))
+        log_ok "Update erfolgreich! Heimatland-Sets: ${stats[0]} IPv4, ${stats[1]} IPv6"
+    else
+        log_error "Update fehlgeschlagen! Führe manuell aus: geoip-manager update"
+        return 1
+    fi
+    
+    log_info "💡 Das Land '$country_code' ist jetzt geschützt und wird nie blockiert."
+}
+
+##
+# Country-Management-Hauptfunktion.
+##
+handle_country_command() {
+    local action="$1"
+    local country_code="$2"
+    
+    case "$action" in
+        list)
+            show_country_config
+            ;;
+        add)
+            add_country_to_blocklist "$country_code"
+            ;;
+        remove)
+            remove_country_from_blocklist "$country_code"
+            ;;
+        home)
+            set_home_country "$country_code"
+            ;;
+        *)
+            log_error "Unbekannte Country-Aktion: '$action'"
+            echo
+            log_info "Verfügbare Aktionen:"
+            log_info "  geoip-manager country list           - Zeigt aktuelle Konfiguration"
+            log_info "  geoip-manager country add <CODE>     - Fügt Land zur Blockliste hinzu"
+            log_info "  geoip-manager country remove <CODE>  - Entfernt Land von Blockliste"
+            log_info "  geoip-manager country home <CODE>    - Setzt Heimatland"
+            return 1
+            ;;
+    esac
+}
+
+# ═══════════════════════════════════════════════════════════════════════════
 # BENUTZER-KOMMANDOS
 # ═══════════════════════════════════════════════════════════════════════════
 
@@ -286,6 +592,7 @@ show_status() {
     echo -e "${BLUE}--- Schnell-Befehle ---${NC}"
     echo -e "Manuelles Update: ${YELLOW}geoip-manager update${NC}"
     echo -e "Traffic-Statistiken: ${YELLOW}geoip-manager hits${NC}"
+    echo -e "Länder verwalten: ${YELLOW}geoip-manager country list${NC}"
     echo -e "Logs anzeigen: ${YELLOW}geoip-manager logs${NC}"
     
     # Notfall-Befehle nur bei Problemen
@@ -517,13 +824,17 @@ ${CYAN}VERWENDUNG:${NC}
   geoip-manager [BEFEHL] [OPTIONEN]
 
 ${CYAN}BEFEHLE:${NC}
-  status              - Zeigt Status, Konfiguration und Set-Statistiken
-  update              - Startet manuelles Update der IP-Listen (dauert ~60s)
-  hits                - Zeigt Traffic-Statistiken der GeoIP-Regeln
-  test <IP>           - Simuliert und verfolgt Behandlung einer IP
-  allow <IP/CIDR>     - Fügt IP/Netz zur manuellen Allowlist hinzu
-  logs [Anzahl]       - Zeigt Update-Logs (Standard: 50 Einträge)
-  help                - Zeigt diese ausführliche Hilfe
+  status                       - Zeigt Status, Konfiguration und Set-Statistiken
+  update                       - Startet manuelles Update der IP-Listen (dauert ~60s)
+  hits                         - Zeigt Traffic-Statistiken der GeoIP-Regeln
+  test <IP>                    - Simuliert und verfolgt Behandlung einer IP
+  allow <IP/CIDR>              - Fügt IP/Netz zur manuellen Allowlist hinzu
+  country list                 - Zeigt aktuelle Länder-Konfiguration
+  country add <CODE>           - Fügt Land zur Blockliste hinzu
+  country remove <CODE>        - Entfernt Land von Blockliste
+  country home <CODE>          - Setzt Heimatland (geschützt)
+  logs [Anzahl]                - Zeigt Update-Logs (Standard: 50 Einträge)
+  help                         - Zeigt diese ausführliche Hilfe
 
 ${CYAN}BEISPIELE:${NC}
   geoip-manager status                    # Status-Übersicht anzeigen
@@ -531,6 +842,10 @@ ${CYAN}BEISPIELE:${NC}
   geoip-manager test 8.8.8.8             # Teste Google-DNS
   geoip-manager allow 192.168.1.0/24     # Erlaube lokales Netz
   geoip-manager hits                      # Zeige Angriffs-Statistiken
+  geoip-manager country list              # Zeige Länder-Konfiguration
+  geoip-manager country add RU            # Blockiere Russland
+  geoip-manager country remove CN         # Entferne China aus Blockliste
+  geoip-manager country home DE           # Setze Deutschland als Heimat
   geoip-manager logs 100                  # Zeige letzte 100 Log-Einträge
 
 ${CYAN}VERWALTUNG:${NC}
@@ -588,6 +903,9 @@ main() {
         allow)
             add_ip_to_allowlist "$2"
             ;;
+        country)
+            handle_country_command "$2" "$3"
+            ;;
         logs)
             show_logs "${2:-50}"
             ;;
@@ -597,7 +915,7 @@ main() {
         *)
             log_error "Unbekannter Befehl: '$1'"
             echo
-            log_info "Verfügbare Befehle: status, update, hits, test, allow, logs, help"
+            log_info "Verfügbare Befehle: status, update, hits, test, allow, country, logs, help"
             log_info "Ausführliche Hilfe: geoip-manager help"
             exit 1
             ;;
