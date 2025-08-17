@@ -359,10 +359,16 @@ main() {
     check_configuration
     
     # Konfiguration laden
-    local countries_to_block
-    countries_to_block=$(cat "$COUNTRIES_FILE" 2>/dev/null | tr '\n' ' ' | xargs)
-    local home_country
-    home_country=$(cat "$HOME_COUNTRY_FILE" 2>/dev/null | xargs)
+    local countries_to_block=""
+    local home_country=""
+    
+    if [ -f "$COUNTRIES_FILE" ]; then
+        countries_to_block=$(cat "$COUNTRIES_FILE" 2>/dev/null | tr '\n' ' ' | xargs)
+    fi
+    
+    if [ -f "$HOME_COUNTRY_FILE" ]; then
+        home_country=$(cat "$HOME_COUNTRY_FILE" 2>/dev/null | xargs)
+    fi
     
     log_info "Konfiguration geladen:"
     log_info "  Blockierte Länder: ${countries_to_block:-'Keine'}"
@@ -373,16 +379,13 @@ main() {
         exit 0
     fi
     
-    # Temporäre Dateien erstellen
-    local temp_blocked_v4 temp_blocked_v6 temp_home_v4 temp_home_v6
-    local temp_allowlist_v4 temp_allowlist_v6
-    
-    temp_blocked_v4=$(mktemp)
-    temp_blocked_v6=$(mktemp)
-    temp_home_v4=$(mktemp)
-    temp_home_v6=$(mktemp)
-    temp_allowlist_v4=$(mktemp)
-    temp_allowlist_v6=$(mktemp)
+    # KORRIGIERT: Temporäre Dateien direkt bei Deklaration erstellen (löst set -u Problem)
+    local temp_blocked_v4=$(mktemp)
+    local temp_blocked_v6=$(mktemp)
+    local temp_home_v4=$(mktemp)
+    local temp_home_v6=$(mktemp)
+    local temp_allowlist_v4=$(mktemp)
+    local temp_allowlist_v6=$(mktemp)
     
     # Cleanup-Trap setzen
     trap 'rm -f "$temp_blocked_v4" "$temp_blocked_v6" "$temp_home_v4" "$temp_home_v6" "$temp_allowlist_v4" "$temp_allowlist_v6"' EXIT
