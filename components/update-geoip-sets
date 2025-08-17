@@ -45,10 +45,12 @@ cleanup() {
 }
 trap cleanup EXIT HUP INT TERM
 
-log_info() { echo -e "${CYAN}[INFO]${NC} $*" >&2; logger -t "$LOG_TAG" -p "daemon.info" "$*"; }
-log_ok() { echo -e "${GREEN}[OK]${NC} $*" >&2; logger -t "$LOG_TAG" -p "daemon.notice" "SUCCESS: $*"; }
-log_warn() { echo -e "${YELLOW}[WARN]${NC} $*" >&2; logger -t "$LOG_TAG" -p "daemon.warning" "WARN: $*"; }
-log_error() { echo -e "${RED}[ERROR]${NC} $*" >&2; logger -t "$LOG_TAG" -p "daemon.err" "ERROR: $*"; }
+log_info() { echo -e "${CYAN}[INFO]${NC} $*" >&2; logger -t "$LOG_TAG" -p "daemon.info" -- "$*"; }
+log_ok() { echo -e "${GREEN}[OK]${NC} $*" >&2; logger -t "$LOG_TAG" -p "daemon.notice" -- "SUCCESS: $*"; }
+log_warn() { echo -e "${YELLOW}[WARN]${NC} $*" >&2; logger -t "$LOG_TAG" -p "daemon.warning" -- "WARN: $*"; }
+log_error() { echo -e "${RED}[ERROR]${NC} $*" >&2; logger -t "$LOG_TAG" -p "daemon.err" -- "ERROR: $*"; }
+
+
 
 # ═══════════════════════════════════════════════════════════════════════════
 # HELFER-FUNKTIONEN
