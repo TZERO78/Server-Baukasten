@@ -113,31 +113,25 @@ check_geoip_installation() {
 # Erkennt den aktuellen Status der GeoIP-Chain (ROBUSTE VERSION).
 ##
 detect_geoip_chain_status() {
-    # 1. Prüfen: Existiert die geoip_check-Chain überhaupt?
+    # 1. Chain existiert?
     if ! $NFT_CMD list chain inet filter geoip_check >/dev/null 2>&1; then
         echo "missing"
         return
     fi
     
-    # 2. ROBUSTE PRÜFUNG: Ist die jump-Regel in der input-Chain vorhanden?
-    # Suche nur nach "jump geoip_check" ohne spezifische Kommentar-Formatierung
-    if ! $NFT_CMD list chain inet filter input 2>/dev/null | grep -q 'jump geoip_check'; then
+    # 2. Integration prüfen über Handle-IDs
+    local input_handles=$($NFT_CMD -a list chain inet filter input 2>/dev/null | grep "jump geoip_check" | grep -o "# handle [0-9]*")
+    
+    if [ -z "$input_handles" ]; then
         echo "unintegrated"
         return
     fi
-
-    # 3. Prüfen: Sind die Sets mit IPs befüllt?
-    local stats
-    stats=($(get_set_stats))
     
-    # Zählt die IPs in allen 4 Sets zusammen (home_v4, home_v6, blocked_v4, blocked_v6)
+    # 3. Sets prüfen (bleibt gleich)
+    local stats=($(get_set_stats))
     local total_ips=$(( ${stats[0]:-0} + ${stats[1]:-0} + ${stats[2]:-0} + ${stats[3]:-0} ))
     
-    if [ "$total_ips" -gt 10 ]; then
-        echo "active"
-    else
-        echo "empty_sets"
-    fi
+    [ "$total_ips" -gt 10 ] && echo "active" || echo "empty_sets"
 }
 
 ##
