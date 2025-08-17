@@ -16,7 +16,7 @@
 ################################################################################
 
 set -euo pipefail
-set -x
+#set -x
 
 # ═══════════════════════════════════════════════════════════════════════════
 # KONFIGURATION
@@ -322,39 +322,77 @@ add_elements_in_chunks() {
 ##
 # Lädt persistente Allowlist-Einträge.
 ##
+# ===================================================================
+# ===== ULTIMATIVE DEBUG-VERSION von load_persistent_allowlist ======
+# ===================================================================
 load_persistent_allowlist() {
+    echo "## DEBUG: Betrete Funktion load_persistent_allowlist..." >&2
     local allowlist_v4="$1"
     local allowlist_v6="$2"
-    
+    local exit_code=0 # Eine Hilfsvariable für Exit-Codes
+
+    # --- SCHRITT 1: Die Datei selbst genauestens prüfen ---
+    echo "## DEBUG: Prüfe Datei: '$ALLOWLIST_FILE'" >&2
     if [ ! -f "$ALLOWLIST_FILE" ]; then
-        log_debug "Keine persistente Allowlist gefunden ($ALLOWLIST_FILE)"
+        echo "## DEBUG: Datei existiert nicht. Funktion wird normal beendet." >&2
         return 0
     fi
     
-    log_info "Lade persistente Allowlist-Einträge..."
+    # Zeige uns alle Details zur Datei (Besitzer, Rechte, Größe, Datum)
+    ls -l "$ALLOWLIST_FILE" >&2
     
-    local v4_count=0
-    local v6_count=0
+    if [ ! -s "$ALLOWLIST_FILE" ]; then
+        echo "## DEBUG: Datei ist leer. Funktion wird normal beendet." >&2
+        return 0
+    fi
+
+    log_info "Lade persistente Allowlist-Einträge (ULTRA-DEBUG)..."
+    local line_num=0; local v4_count=0; local v6_count=0
+
+    # --- SCHRITT 2: Die Datei sicher in ein Array einlesen ---
+    echo "## DEBUG: Lese gesamten Datei-Inhalt in ein Array..." >&2
+    readarray -t lines < "$ALLOWLIST_FILE"
+    exit_code=$?; echo "## DEBUG: Exit-Code von 'readarray': $exit_code" >&2
     
-    while IFS= read -r line; do
+    if [ $exit_code -ne 0 ]; then
+         echo "## FEHLER: 'readarray' ist fehlgeschlagen! Breche ab." >&2
+         return 1 # Gib einen Fehler zurück
+    fi
+    echo "## DEBUG: Einlesen erfolgreich. ${#lines[@]} Zeilen im Speicher." >&2
+
+    # --- SCHRITT 3: Das Array Zeile für Zeile verarbeiten ---
+    for line in "${lines[@]}"; do
+        ((line_num++))
+        echo "----------------------------------------------------" >&2
+        echo "## DEBUG: >> Starte Schleife für Zeile $line_num: '$line'" >&2
+
         # Überspringe leere Zeilen und Kommentare
-        [[ -z "$line" || "$line" =~ ^[[:space:]]*# ]] && continue
+        if [[ -z "$line" || "$line" =~ ^[[:space:]]*# ]]; then
+            echo "## DEBUG: Zeile ist leer oder ein Kommentar. Überspringe." >&2
+            continue
+        fi
         
-        # Entferne führende/nachfolgende Leerzeichen
         line=$(echo "$line" | xargs)
-        
+        exit_code=$?; echo "## DEBUG: Exit-Code von 'xargs': $exit_code" >&2
+
         if [[ "$line" == *":"* ]]; then
-            # IPv6
             echo "$line" >> "$allowlist_v6"
+            exit_code=$?; echo "## DEBUG: Exit-Code von 'echo >> v6_file': $exit_code" >&2
             ((v6_count++))
         else
-            # IPv4
             echo "$line" >> "$allowlist_v4"
+            exit_code=$?; echo "## DEBUG: Exit-Code von 'echo >> v4_file': $exit_code" >&2
             ((v4_count++))
         fi
-    done < "$ALLOWLIST_FILE"
-    
+        echo "## DEBUG: Aktueller Zähler: v4=$v4_count, v6=$v6_count" >&2
+        echo "## DEBUG: << Beende Schleife für Zeile $line_num." >&2
+    done
+
+    # --- SCHRITT 4: Aufräumen und Funktion beenden ---
+    echo "----------------------------------------------------" >&2
+    echo "## DEBUG: Schleife komplett durchgelaufen." >&2
     log_info "Persistente Allowlist geladen: $v4_count IPv4, $v6_count IPv6"
+    echo "## DEBUG: Verlasse Funktion load_persistent_allowlist erfolgreich." >&2
 }
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -415,7 +453,10 @@ main() {
     fi
     
     # Persistente Allowlist laden
+    echo "## DEBUG: MAIN: Rufe jetzt load_persistent_allowlist auf..." >&2
     load_persistent_allowlist "$temp_allowlist_v4" "$temp_allowlist_v6"
+    echo "## DEBUG: MAIN: Rückkehr von load_persistent_allowlist. Skript läuft weiter." >&2
+
     
     # Prüfe ob mindestens ein Download erfolgreich war
     if [ "$download_success" = "false" ]; then
