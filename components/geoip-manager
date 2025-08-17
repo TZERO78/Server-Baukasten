@@ -30,6 +30,9 @@ readonly ALLOWLIST_FILE="/etc/geoip-allowlist.conf"
 readonly UPDATE_SCRIPT="/usr/local/bin/update-geoip-sets"
 readonly LOG_TAG="geoip-manager"
 
+# NFT-Befehl mit vollem Pfad (robuster)
+readonly NFT_CMD="/usr/sbin/nft"
+
 # Farben für bessere Lesbarkeit
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; BLUE='\033[0;34m'
 CYAN='\033[0;36m'; PURPLE='\033[0;35m'; NC='\033[0m'
@@ -57,11 +60,17 @@ print_header() {
 check_dependencies() {
     local missing_deps=()
     
-    for cmd in nft systemctl journalctl; do
+    # Prüfe kritische Befehle
+    for cmd in systemctl journalctl; do
         if ! command -v "$cmd" >/dev/null 2>&1; then
             missing_deps+=("$cmd")
         fi
     done
+    
+    # Prüfe NFT mit vollem Pfad
+    if [ ! -x "$NFT_CMD" ]; then
+        missing_deps+=("nft")
+    fi
     
     if [ ${#missing_deps[@]} -gt 0 ]; then
         log_error "Fehlende Abhängigkeiten: ${missing_deps[*]}"
@@ -89,7 +98,7 @@ check_geoip_installation() {
     fi
     
     # Prüfe NFTables-Integration
-    if ! nft list chain inet filter geoip_check >/dev/null 2>&1; then
+    if ! $NFT_CMD list chain inet filter geoip_check >/dev/null 2>&1; then
         log_error "GeoIP-Chain 'geoip_check' nicht gefunden!"
         log_error "Firewall-Integration fehlt oder ist beschädigt."
         exit 1
@@ -97,21 +106,22 @@ check_geoip_installation() {
 }
 
 # ═══════════════════════════════════════════════════════════════════════════
-# KERN-FUNKTIONEN FÜR GEOIP-MANAGEMENT
+# KERN-FUNKTIONEN FÜR GEOIP-MANAGEMENT (KORRIGIERT)
 # ═══════════════════════════════════════════════════════════════════════════
 
 ##
-# Erkennt den aktuellen Status der GeoIP-Chain.
+# Erkennt den aktuellen Status der GeoIP-Chain (ROBUSTE VERSION).
 ##
 detect_geoip_chain_status() {
     # 1. Prüfen: Existiert die geoip_check-Chain überhaupt?
-    if ! nft list chain inet filter geoip_check >/dev/null 2>&1; then
+    if ! $NFT_CMD list chain inet filter geoip_check >/dev/null 2>&1; then
         echo "missing"
         return
     fi
     
-    # 2. Prüfen: Ist die jump-Regel in der input-Chain vorhanden?
-    if ! nft list chain inet filter input 2>/dev/null | grep -q 'jump geoip_check comment GeoIP-Filter'; then
+    # 2. ROBUSTE PRÜFUNG: Ist die jump-Regel in der input-Chain vorhanden?
+    # Suche nur nach "jump geoip_check" ohne spezifische Kommentar-Formatierung
+    if ! $NFT_CMD list chain inet filter input 2>/dev/null | grep -q 'jump geoip_check'; then
         echo "unintegrated"
         return
     fi
@@ -131,16 +141,16 @@ detect_geoip_chain_status() {
 }
 
 ##
-# Zählt die IPs in allen GeoIP-Sets zuverlässig.
+# Zählt die IPs in allen GeoIP-Sets zuverlässig (KORRIGIERTE VERSION).
 ##
 get_set_stats() {
-    # IPv4-Sets: Zähle Zeilen die mit Zahlen beginnen
-    local home_v4=$(nft list set inet filter geoip_home_v4 2>/dev/null | grep -c "^[[:space:]]*[0-9]" | tr -d '\n\r' || echo "0")
-    local blocked_v4=$(nft list set inet filter geoip_blocked_v4 2>/dev/null | grep -c "^[[:space:]]*[0-9]" | tr -d '\n\r' || echo "0")
+    # IPv4-Sets: Zähle Zeilen die mit Zahlen beginnen (mit tr -d für saubere Ausgabe)
+    local home_v4=$($NFT_CMD list set inet filter geoip_home_v4 2>/dev/null | grep -c "^[[:space:]]*[0-9]" | tr -d '\n\r' || echo "0")
+    local blocked_v4=$($NFT_CMD list set inet filter geoip_blocked_v4 2>/dev/null | grep -c "^[[:space:]]*[0-9]" | tr -d '\n\r' || echo "0")
     
     # IPv6-Sets: Zähle Zeilen die :: enthalten (charakteristisch für IPv6)
-    local home_v6=$(nft list set inet filter geoip_home_v6 2>/dev/null | grep -c "::" | tr -d '\n\r' || echo "0")
-    local blocked_v6=$(nft list set inet filter geoip_blocked_v6 2>/dev/null | grep -c "::" | tr -d '\n\r' || echo "0")
+    local home_v6=$($NFT_CMD list set inet filter geoip_home_v6 2>/dev/null | grep -c "::" | tr -d '\n\r' || echo "0")
+    local blocked_v6=$($NFT_CMD list set inet filter geoip_blocked_v6 2>/dev/null | grep -c "::" | tr -d '\n\r' || echo "0")
     
     echo "$home_v4 $home_v6 $blocked_v4 $blocked_v6"
 }
@@ -172,7 +182,8 @@ get_configuration() {
 # BENUTZER-KOMMANDOS
 # ═══════════════════════════════════════════════════════════════════════════
 
-# Zeigt einen detaillierten Status-Überblick.
+##
+# Zeigt einen detaillierten Status-Überblick (KORRIGIERTE VERSION).
 ##
 show_status() {
     print_header "GeoIP-Blocking Status (Set-basiert) v$VERSION"
@@ -214,8 +225,8 @@ show_status() {
         "unintegrated")
             echo -e "Firewall-Integration: ${YELLOW}⚠️  NICHT INTEGRIERT${NC}"
             log_warn "GeoIP-Chain existiert, aber ist nicht in der Firewall aktiv!"
-            log_warn "Die jump-Regel 'jump geoip_check comment \"GeoIP-Filter\"' fehlt in der input-Chain."
-            log_info "Lösung: Firewall neu laden mit: nft -f /etc/nftables.conf"
+            log_warn "Die jump-Regel fehlt in der input-Chain."
+            log_info "Lösung: Firewall neu laden mit: $NFT_CMD -f /etc/nftables.conf"
             ;;
         "empty_sets")
             echo -e "Firewall-Integration: ${YELLOW}⚠️  SETS LEER${NC}"
@@ -259,11 +270,12 @@ show_status() {
     fi
     
     local allowlist_v4_count
-    allowlist_v4_count=$(nft list set inet filter geoip_allowlist_v4 2>/dev/null | grep -c "^[[:space:]]*[0-9]" | tr -d '\n\r' || echo "0")
+    allowlist_v4_count=$($NFT_CMD list set inet filter geoip_allowlist_v4 2>/dev/null | grep -c "^[[:space:]]*[0-9]" | tr -d '\n\r' || echo "0")
     local allowlist_v6_count
-    allowlist_v6_count=$(nft list set inet filter geoip_allowlist_v6 2>/dev/null | grep -c "::" | tr -d '\n\r' || echo "0")
+    allowlist_v6_count=$($NFT_CMD list set inet filter geoip_allowlist_v6 2>/dev/null | grep -c "::" | tr -d '\n\r' || echo "0")
     
-    echo -e "Manuelle Allowlist: ${CYAN}${manual_allowlist_count} persistent, ${allowlist_v4_count} IPv4, ${allowlist_v6_count} IPv6 aktiv${NC}"    
+    echo -e "Manuelle Allowlist: ${CYAN}${manual_allowlist_count} persistent, ${allowlist_v4_count} IPv4, ${allowlist_v6_count} IPv6 aktiv${NC}"
+    
     # Performance-Info (KORRIGIERT - verhindert Syntaxfehler)
     echo -e "${BLUE}--- Performance & Empfehlungen ---${NC}"
     local total_ips=$(( home_v4 + home_v6 + blocked_v4 + blocked_v6 + allowlist_v4_count + allowlist_v6_count ))
@@ -286,8 +298,8 @@ show_status() {
     if [ "$chain_status" != "active" ]; then
         echo
         echo -e "${RED}--- Notfall-Befehle ---${NC}"
-        echo -e "Firewall neu laden: ${YELLOW}sudo nft -f /etc/nftables.conf${NC}"
-        echo -e "GeoIP deaktivieren: ${YELLOW}sudo nft delete rule inet filter input jump geoip_check${NC}"
+        echo -e "Firewall neu laden: ${YELLOW}sudo $NFT_CMD -f /etc/nftables.conf${NC}"
+        echo -e "GeoIP deaktivieren: ${YELLOW}sudo $NFT_CMD delete rule inet filter input jump geoip_check${NC}"
     fi
 }
 
@@ -327,13 +339,13 @@ run_manual_update() {
 show_traffic_hits() {
     print_header "GeoIP Traffic-Statistiken (seit letztem Neustart)"
     
-    if ! nft list chain inet filter geoip_check >/dev/null 2>&1; then
+    if ! $NFT_CMD list chain inet filter geoip_check >/dev/null 2>&1; then
         log_error "GeoIP-Chain nicht gefunden! System nicht installiert."
         return 1
     fi
     
     local chain_content
-    chain_content=$(nft -a list chain inet filter geoip_check 2>/dev/null)
+    chain_content=$($NFT_CMD -a list chain inet filter geoip_check 2>/dev/null)
     
     if [ -z "$chain_content" ]; then
         log_warn "GeoIP-Chain ist leer oder nicht erreichbar."
@@ -399,17 +411,17 @@ test_ip_treatment() {
     
     if [[ "$ip_to_test" == *":"* ]]; then
         # IPv6
-        log_info "Trace-Befehl: nft trace inet filter input ip6 saddr $ip_to_test ip6 nexthdr tcp tcp dport 22"
+        log_info "Trace-Befehl: $NFT_CMD trace inet filter input ip6 saddr $ip_to_test ip6 nexthdr tcp tcp dport 22"
         echo
-        nft trace inet filter input ip6 saddr "$ip_to_test" ip6 nexthdr tcp tcp dport 22 2>&1 | head -20 || {
-            log_warn "Trace-Ausgabe nicht verfügbar. Prüfe manuell mit nft list ruleset."
+        $NFT_CMD trace inet filter input ip6 saddr "$ip_to_test" ip6 nexthdr tcp tcp dport 22 2>&1 | head -20 || {
+            log_warn "Trace-Ausgabe nicht verfügbar. Prüfe manuell mit $NFT_CMD list ruleset."
         }
     else
         # IPv4
-        log_info "Trace-Befehl: nft trace inet filter input ip saddr $ip_to_test ip protocol tcp tcp dport 22"
+        log_info "Trace-Befehl: $NFT_CMD trace inet filter input ip saddr $ip_to_test ip protocol tcp tcp dport 22"
         echo
-        nft trace inet filter input ip saddr "$ip_to_test" ip protocol tcp tcp dport 22 2>&1 | head -20 || {
-            log_warn "Trace-Ausgabe nicht verfügbar. Prüfe manuell mit nft list ruleset."
+        $NFT_CMD trace inet filter input ip saddr "$ip_to_test" ip protocol tcp tcp dport 22 2>&1 | head -20 || {
+            log_warn "Trace-Ausgabe nicht verfügbar. Prüfe manuell mit $NFT_CMD list ruleset."
         }
     fi
     
@@ -453,7 +465,7 @@ add_ip_to_allowlist() {
     fi
     
     # Füge zur NFTables-Allowlist hinzu
-    if nft add element inet filter "$target_set" "{ $ip_to_allow }" 2>/dev/null; then
+    if $NFT_CMD add element inet filter "$target_set" "{ $ip_to_allow }" 2>/dev/null; then
         log_ok "IP $ip_to_allow erfolgreich zum Set '$target_set' hinzugefügt."
     else
         log_error "Fehler beim Hinzufügen zu NFTables-Set!"
@@ -470,7 +482,7 @@ add_ip_to_allowlist() {
     fi
     
     log_info "💡 Die IP ist nun dauerhaft von GeoIP-Blocking ausgenommen."
-    log_info "💡 Entfernen mit: nft delete element inet filter $target_set { $ip_to_allow }"
+    log_info "💡 Entfernen mit: $NFT_CMD delete element inet filter $target_set { $ip_to_allow }"
 }
 
 ##
@@ -537,11 +549,11 @@ ${CYAN}KONFIGURATION:${NC}
 
 ${CYAN}NOTFÄLLE:${NC}
   GeoIP komplett deaktivieren:
-    nft delete rule inet filter input jump geoip_check
+    $NFT_CMD delete rule inet filter input jump geoip_check
   
   Alle Blockierungen aufheben:
-    nft flush set inet filter geoip_blocked_v4
-    nft flush set inet filter geoip_blocked_v6
+    $NFT_CMD flush set inet filter geoip_blocked_v4
+    $NFT_CMD flush set inet filter geoip_blocked_v6
 
 ${CYAN}SUPPORT:${NC}
   📋 Repository: https://github.com/TZERO78/Server-Baukasten
