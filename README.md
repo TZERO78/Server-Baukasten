@@ -2,7 +2,7 @@
 
 **Vollautomatische Linux-Server-Härtung mit modularer Multi-Layer-Security-Architektur**
 
-> 🚀 **Ein Skript, um einen neuen Linux-Server in 20 Minuten in eine uneinnehmbare Festung zu verwandeln.**
+> 🚀 **Ein Skript, um einen neuen Linux-Server in 20 Minuten in Festung zu verwandeln.**
 >
 > Das Hauptziel ist ein **von außen unsichtbarer Server**, der ausschließlich über ein sicheres VPN (Tailscale) erreichbar ist. Dadurch wird die Angriffsfläche gegen Null reduziert, noch bevor die Firewall überhaupt greift.
 
