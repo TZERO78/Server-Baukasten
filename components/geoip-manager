@@ -111,7 +111,7 @@ detect_geoip_chain_status() {
     fi
     
     # 2. Prüfen: Ist die jump-Regel in der input-Chain vorhanden?
-    if ! nft list chain inet filter input 2>/dev/null | grep -q 'jump geoip_check comment "GeoIP-Filter"'; then
+    if ! nft list chain inet filter input 2>/dev/null | grep -q 'jump geoip_check comment GeoIP-Filter'; then
         echo "unintegrated"
         return
     fi
