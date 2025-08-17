@@ -131,16 +131,16 @@ detect_geoip_chain_status() {
 }
 
 ##
-# Zählt die IPs in allen GeoIP-Sets.
+# Zählt die IPs in allen GeoIP-Sets zuverlässig.
 ##
 get_set_stats() {
     # IPv4-Sets: Zähle Zeilen die mit Zahlen beginnen
-    local home_v4=$(nft list set inet filter geoip_home_v4 2>/dev/null | grep -c "^[[:space:]]*[0-9]" || echo "0")
-    local blocked_v4=$(nft list set inet filter geoip_blocked_v4 2>/dev/null | grep -c "^[[:space:]]*[0-9]" || echo "0")
+    local home_v4=$(nft list set inet filter geoip_home_v4 2>/dev/null | grep -c "^[[:space:]]*[0-9]" | tr -d '\n\r' || echo "0")
+    local blocked_v4=$(nft list set inet filter geoip_blocked_v4 2>/dev/null | grep -c "^[[:space:]]*[0-9]" | tr -d '\n\r' || echo "0")
     
     # IPv6-Sets: Zähle Zeilen die :: enthalten (charakteristisch für IPv6)
-    local home_v6=$(nft list set inet filter geoip_home_v6 2>/dev/null | grep -c "::" || echo "0")
-    local blocked_v6=$(nft list set inet filter geoip_blocked_v6 2>/dev/null | grep -c "::" || echo "0")
+    local home_v6=$(nft list set inet filter geoip_home_v6 2>/dev/null | grep -c "::" | tr -d '\n\r' || echo "0")
+    local blocked_v6=$(nft list set inet filter geoip_blocked_v6 2>/dev/null | grep -c "::" | tr -d '\n\r' || echo "0")
     
     echo "$home_v4 $home_v6 $blocked_v4 $blocked_v6"
 }
@@ -153,14 +153,14 @@ get_configuration() {
     local home_country="Nicht gesetzt"
     
     if [ -f "$COUNTRIES_FILE" ] && [ -r "$COUNTRIES_FILE" ]; then
-        blocked_countries=$(cat "$COUNTRIES_FILE" 2>/dev/null || echo 'Lesefehler')
+        blocked_countries=$(cat "$COUNTRIES_FILE" 2>/dev/null | tr -d '\n\r' || echo 'Lesefehler')
         # Entferne führende/nachfolgende Leerzeichen
         blocked_countries=$(echo "$blocked_countries" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
         [ -z "$blocked_countries" ] && blocked_countries="Leer"
     fi
     
     if [ -f "$HOME_COUNTRY_FILE" ] && [ -r "$HOME_COUNTRY_FILE" ]; then
-        home_country=$(cat "$HOME_COUNTRY_FILE" 2>/dev/null || echo 'Lesefehler')
+        home_country=$(cat "$HOME_COUNTRY_FILE" 2>/dev/null | tr -d '\n\r' || echo 'Lesefehler')
         home_country=$(echo "$home_country" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
         [ -z "$home_country" ] && home_country="Leer"
     fi
@@ -172,8 +172,7 @@ get_configuration() {
 # BENUTZER-KOMMANDOS
 # ═══════════════════════════════════════════════════════════════════════════
 
-##
-# Zeigt einen detaillierten Status-Überblick mit verbesserter Fehlerbehandlung.
+# Zeigt einen detaillierten Status-Überblick.
 ##
 show_status() {
     print_header "GeoIP-Blocking Status (Set-basiert) v$VERSION"
@@ -253,20 +252,20 @@ show_status() {
         log_warn "Keine blockierten IPs geladen. GeoIP-Blocking ist inaktiv."
     fi
     
-    # Allowlist-Statistik (KORRIGIERT)
+    # Allowlist-Statistik (KORRIGIERT - verhindert Syntaxfehler)
     local manual_allowlist_count=0
     if [ -f "$ALLOWLIST_FILE" ]; then
-        manual_allowlist_count=$(grep -c '^[^#]' "$ALLOWLIST_FILE" 2>/dev/null || echo "0")
+        manual_allowlist_count=$(grep -c '^[^#]' "$ALLOWLIST_FILE" 2>/dev/null | tr -d '\n\r' || echo "0")
     fi
     
-    local allowlist_v4_count=$(nft list set inet filter geoip_allowlist_v4 2>/dev/null | grep -c "^\s*[0-9]" || echo "0")
-    local allowlist_v6_count=$(nft list set inet filter geoip_allowlist_v6 2>/dev/null | grep -c "::" || echo "0")
+    local allowlist_v4_count=$(nft list set inet filter geoip_allowlist_v4 2>/dev/null | grep -c "^[[:space:]]*[0-9]" | tr -d '\n\r' || echo "0")
+    local allowlist_v6_count=$(nft list set inet filter geoip_allowlist_v6 2>/dev/null | grep -c "::" | tr -d '\n\r' || echo "0")
     
-    echo -e "Manuelle Allowlist: ${CYAN}$manual_allowlist_count persistent, $allowlist_v4_count IPv4, $allowlist_v6_count IPv6 aktiv${NC}"
+    echo -e "Manuelle Allowlist: ${CYAN}${manual_allowlist_count} persistent, ${allowlist_v4_count} IPv4, ${allowlist_v6_count} IPv6 aktiv${NC}"
     
-    # Performance-Info (KORRIGIERT)
+    # Performance-Info (KORRIGIERT - verhindert Syntaxfehler)
     echo -e "${BLUE}--- Performance & Empfehlungen ---${NC}"
-    local total_ips=$((home_v4 + home_v6 + blocked_v4 + blocked_v6 + allowlist_v4_count + allowlist_v6_count))
+    local total_ips=$(( home_v4 + home_v6 + blocked_v4 + blocked_v6 + allowlist_v4_count + allowlist_v6_count ))
     
     if [ "$total_ips" -gt 5000000 ]; then
         log_warn "Sehr große IP-Sets ($total_ips IPs) - kann Performance beeinträchtigen."
