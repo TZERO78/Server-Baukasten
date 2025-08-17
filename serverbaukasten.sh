@@ -921,37 +921,35 @@ setup_integrity_monitoring() {
     local TEST_MODE="$1"
     log_info "📊 MODUL: System-Integritäts-Monitoring"
 
+    if [ "$TEST_MODE" = true ]; then
+        log_warn "TEST-MODUS: Überspringe Integritäts-Monitoring komplett (AIDE & RKHunter)."
+        log_info "  💡 Grund: Zeitaufwändige Installation, Konfiguration und DB-Initialisierung."
+        return 0
+    fi
+
     # --- Schritt 1/3: Basispakete installieren ---
     log_info "  -> 1/3: Installiere Basispakete (aide, rkhunter)..."
     run_with_spinner "Installiere aide & rkhunter..." "apt-get install -y aide rkhunter"
 
-    # --- Schritt 2/3: Tools konfigurieren (Conf-Dateien & systemd-Units) ---
+    # --- Schritt 2/3: Tools konfigurieren ---
     log_info "  -> 2/3: Konfiguriere Tools (systemd-Timer, .conf-Dateien)..."
-    # Die aufgerufenen Funktionen 'configure_aide' und 'configure_rkhunter'
-    # enthalten ihre eigenen, detaillierten Log-Meldungen.
     configure_aide
     configure_rkhunter
 
-    # --- Schritt 3/3: Datenbanken initialisieren (zeitaufwändig) ---
+    # --- Schritt 3/3: Datenbanken initialisieren ---
     log_info "  -> 3/3: Initialisiere Datenbanken und Properties..."
-    if [ "$TEST_MODE" = true ]; then
-        log_warn "TEST-MODUS: Überspringe AIDE-DB-Initialisierung und RKHunter-Update."
+    # AIDE-Datenbank initialisieren
+    if run_with_spinner "Initialisiere AIDE-Datenbank..." "/usr/bin/aide --config /etc/aide/aide.conf --init"; then
+        mv /var/lib/aide/aide.db.new /var/lib/aide/aide.db
+        log_ok "AIDE-Datenbank erfolgreich initialisiert."
     else
-        # AIDE-Datenbank mit der frisch erstellten Konfiguration initialisieren
-        if run_with_spinner "Initialisiere AIDE-Datenbank..." "/usr/bin/aide --config /etc/aide/aide.conf --init"; then
-            mv /var/lib/aide/aide.db.new /var/lib/aide/aide.db
-            log_ok "AIDE-Datenbank erfolgreich initialisiert."
-        else
-            log_warn "AIDE-Initialisierung fehlgeschlagen. Manuell prüfen mit: sudo aide --config /etc/aide/aide.conf --init"
-        fi
-        
-        # RKHunter-Properties mit der erstellten Konfiguration aktualisieren
-        run_with_spinner "Aktualisiere RKHunter-Properties..." "rkhunter --propupd"
+        log_warn "AIDE-Initialisierung fehlgeschlagen."
     fi
+    
+    # RKHunter-Properties aktualisieren
+    run_with_spinner "Aktualisiere RKHunter-Properties..." "rkhunter --propupd"
 
     log_ok "Integritäts-Monitoring mit journald konfiguriert."
-    log_info "  📜 AIDE-Logs: journalctl -u aide-check.service"
-    log_info "  🔍 RKHunter-Logs: journalctl -t rkhunter-check"
 }
 
 ##
