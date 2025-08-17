@@ -34,6 +34,18 @@ readonly CONNECT_TIMEOUT=15
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; BLUE='\033[0;34m'
 CYAN='\033[0;36m'; NC='\033[0m'
 
+# Temporäre Dateien erstellen und global verfügbar machen
+temp_blocked_v4=$(mktemp)
+temp_blocked_v6=$(mktemp)
+temp_home_v4=$(mktemp)
+temp_home_v6=$(mktemp)
+temp_allowlist_v4=$(mktemp)
+temp_allowlist_v6=$(mktemp)
+
+# Trap setzen, der die globalen Variablen immer findet und bei Skript-Ende aufräumt
+trap 'rm -f "$temp_blocked_v4" "$temp_blocked_v6" "$temp_home_v4" "$temp_home_v6" "$temp_allowlist_v4" "$temp_allowlist_v6"' EXIT HUP INT TERM
+
+
 # ═══════════════════════════════════════════════════════════════════════════
 # LOGGING-SYSTEM
 # ═══════════════════════════════════════════════════════════════════════════
@@ -378,17 +390,7 @@ main() {
         log_warn "Keine Länder konfiguriert. Update wird beendet."
         exit 0
     fi
-    
-    # KORRIGIERT: Temporäre Dateien direkt bei Deklaration erstellen (löst set -u Problem)
-    local temp_blocked_v4=$(mktemp)
-    local temp_blocked_v6=$(mktemp)
-    local temp_home_v4=$(mktemp)
-    local temp_home_v6=$(mktemp)
-    local temp_allowlist_v4=$(mktemp)
-    local temp_allowlist_v6=$(mktemp)
-    
-    # Cleanup-Trap setzen
-    trap 'rm -f "$temp_blocked_v4" "$temp_blocked_v6" "$temp_home_v4" "$temp_home_v6" "$temp_allowlist_v4" "$temp_allowlist_v6"' EXIT
+
     
     # Downloads parallel starten (IPv4 und IPv6)
     local download_success=true
