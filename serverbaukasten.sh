@@ -1252,164 +1252,197 @@ GEOIP_SETS
 generate_geoip_jump_section() {
     if [ "${ENABLE_GEOIP_BLOCKING:-nein}" = "ja" ]; then
         cat << 'EOF'
-        # 3. GeoIP-Filter (Länder-basierte Bedrohungsabwehr)
-        jump geoip_check comment "GeoIP-Filter"
+jump geoip_check comment "GeoIP-Filter"
 EOF
     fi
 }
 
-##
-# Generiert alle dynamischen Firewall-Regelblöcke (input, forward, nat)
-# basierend auf dem erkannten Systemzustand.
-##
-generate_dynamic_firewall_rules() {
-    local DOCKER_ACTIVE="$1"
-    local DOCKER_INTERFACE_EXISTS="$2"
-    local TAILSCALE_ACTIVE="$3"
-    local TAILSCALE_INTERFACE="$4"
-    local PRIMARY_INTERFACE="$5"
 
-    local input_rules=""
-    local forward_rules=""
-    local nat_rules=""
-
-    # Input-Regeln
+generate_docker_input_section() {
     if [ "$DOCKER_ACTIVE" = "true" ] && [ "$DOCKER_INTERFACE_EXISTS" = "true" ]; then
-        input_rules+="        iifname \"docker0\" accept comment \"Allow-Input-from-Docker-Interface\"\n"
+        cat << 'EOF'
+ip saddr $docker_networks_v4 accept comment "Docker-Container IPv4"
+ip6 saddr $docker_networks_v6 accept comment "Docker-Container IPv6"
+iifname "docker0" accept comment "Docker-Bridge-Interface"
+EOF
     fi
+}
+
+generate_tailscale_input_section() {
     if [ "$TAILSCALE_ACTIVE" = "true" ] && [ -n "$TAILSCALE_INTERFACE" ]; then
-        input_rules+="        iifname \"$TAILSCALE_INTERFACE\" accept comment \"Allow-Input-from-Tailscale-Interface\"\n"
+        cat << EOF
+iifname "$TAILSCALE_INTERFACE" accept comment "Allow-Input-from-Tailscale-Interface"
+EOF
     fi
+}
 
-    # Forward-Regeln
-    if [ "$DOCKER_ACTIVE" = "true" ] && [ "$TAILSCALE_ACTIVE" = "true" ]; then
-        forward_rules+="        iifname \"$TAILSCALE_INTERFACE\" oifname \"docker0\" accept comment \"Allow-Forward-Tailscale-to-Docker\"\n"
-        forward_rules+="        iifname \"docker0\" oifname \"$TAILSCALE_INTERFACE\" accept comment \"Allow-Forward-Docker-to-Tailscale\"\n"
+generate_docker_forward_section() {
+    if [ "$DOCKER_ACTIVE" = "true" ] && [ "$DOCKER_INTERFACE_EXISTS" = "true" ]; then
+        cat << 'EOF'
+# Docker-Container Forwarding
+iifname "docker0" oifname != "docker0" accept comment "Docker-to-External"
+iifname != "docker0" oifname "docker0" ct state related,established accept comment "External-to-Docker-Reply"
+EOF
     fi
+}
 
-    # NAT-Regeln (komplette Tabellen)
-    if [ "$DOCKER_ACTIVE" = "true" ] || [ "$TAILSCALE_ACTIVE" = "true" ]; then
-        nat_rules=$(cat <<NAT_EOF
-table ip nat {
-    chain postrouting {
-        type nat hook postrouting priority srcnat; policy accept;
+
+
+generate_tailscale_forward_section() {
+    if [ "$TAILSCALE_ACTIVE" = "true" ] && [ -n "$TAILSCALE_INTERFACE" ]; then
+        cat << EOF
+iifname "$TAILSCALE_INTERFACE" oifname "docker0" accept comment "Allow-Forward-Tailscale-to-Docker"
+iifname "docker0" oifname "$TAILSCALE_INTERFACE" accept comment "Allow-Forward-Docker-to-Tailscale"
+EOF
+    fi
+}
+
+generate_docker_nat_section() {
+    if [ "$DOCKER_ACTIVE" = "true" ] && [ "$DOCKER_INTERFACE_EXISTS" = "true" ]; then
+        cat << EOF
         oifname "$PRIMARY_INTERFACE" iifname "docker0" masquerade comment "Docker-IPv4-NAT"
-        oifname "$PRIMARY_INTERFACE" iifname "$TAILSCALE_INTERFACE" masquerade comment "Tailscale-IPv4-NAT"
-    }
-}
-table ip6 nat {
-    chain postrouting {
-        type nat hook postrouting priority srcnat; policy accept;
-        oifname "$PRIMARY_INTERFACE" iifname "docker0" masquerade comment "Docker-IPv6-NAT"
-        oifname "$PRIMARY_INTERFACE" iifname "$TAILSCALE_INTERFACE" masquerade comment "Tailscale-IPv6-NAT"
-    }
-}
-NAT_EOF
-)
+EOF
     fi
-    
-    # Gib die drei Regelblöcke zurück, getrennt durch ein eindeutiges Trennzeichen
-    echo -e "$input_rules"
-    echo "---RULE_SEPARATOR---"
-    echo -e "$forward_rules"
-    echo "---RULE_SEPARATOR---"
-    echo -e "$nat_rules"
 }
+
+generate_tailscale_nat_section() {
+    if [ "$TAILSCALE_ACTIVE" = "true" ] && [ -n "$TAILSCALE_INTERFACE" ]; then
+        cat << EOF
+        oifname "$PRIMARY_INTERFACE" iifname "$TAILSCALE_INTERFACE" masquerade comment "Tailscale-IPv4-NAT"
+EOF
+    fi
+}
+
 
 ##
-# Erstellt die komplette /etc/nftables.conf Datei.
-# Nutzt Helfer-Funktionen, um die Konfiguration dynamisch und modular aufzubauen.
+# Erstellt die komplette /etc/nftables.conf Datei mit modularen Template-Funktionen.
 ##
 generate_nftables_config() {
     log_info "🔥 Generiere NFTables-Konfiguration..."
 
-    # 1. System-Zustand für dynamische Regeln ermitteln
+    # System-Zustand ermitteln
     local system_state; system_state=$(detect_system_state); source <(echo "$system_state")
 
-    # 2. Alle dynamischen Regeln mit EINEM Aufruf generieren
-    local all_rules; all_rules=$(generate_dynamic_firewall_rules "$DOCKER_ACTIVE" "$DOCKER_INTERFACE_EXISTS" "$TAILSCALE_ACTIVE" "$TAILSCALE_INTERFACE" "$PRIMARY_INTERFACE")
-    
-    # 3. Ausgabe in separate Variablen aufteilen
-    local input_rules_str=$(echo "$all_rules" | sed '/---RULE_SEPARATOR---/,$d')
-    local forward_rules_str=$(echo "$all_rules" | sed -n '/---RULE_SEPARATOR---/,/---RULE_SEPARATOR---/p' | sed '1d;$d')
-    local nat_rules_str=$(echo "$all_rules" | sed '1,/---RULE_SEPARATOR---/d' | sed '1,/---RULE_SEPARATOR---/d')
-
-    # 4. Liste der privaten Netzwerke dynamisch um Docker erweitern
+    # ✅ SAUBERE TRENNUNG: Private Netze vs. Container-Netze
     local private_nets_v4="10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 127.0.0.0/8"
     local private_nets_v6="::1/128, fc00::/7, fe80::/10"
+    
+    # Docker-Netze SEPARAT definieren
+    local docker_nets_v4=""
+    local docker_nets_v6=""
     if [ "$SERVER_ROLE" = "1" ]; then
-        private_nets_v4+=", $DOCKER_IPV4_CIDR"
-        private_nets_v6+=", $DOCKER_IPV6_CIDR"
+        docker_nets_v4="$DOCKER_IPV4_CIDR"
+        docker_nets_v6="$DOCKER_IPV6_CIDR"
     fi
 
-    # 5. Finalen "Bauplan" in /etc/nftables.conf schreiben
+    # NFTables-Config mit separaten Definitionen
     cat > /etc/nftables.conf <<EOF
+#!/usr/sbin/nft -f
 # =============================================================================
-# SERVER-BAUKASTEN FIREWALL v1.0
+# SERVER-BAUKASTEN FIREWALL v2.0 (Modulare Architektur)
 # =============================================================================
-# Generiert: $(date)
+# Generiert am: $(date)
+# System: $(hostname) - $(uname -r)
+#
+# Diese Firewall implementiert eine mehrstufige Sicherheitsarchitektur:
+# 1. Connection Tracking (established/related zuerst)
+# 2. Invalid Packet Dropping (Schutz vor Fragmentierung-Attacken)  
+# 3. Trusted Zone Protection (Loopback, Private Networks, VPN)
+# 4. GeoIP-basierte Länder-Filterung (falls aktiviert)
+# 5. Explizite Service-Freigaben (SSH, ICMP)
+# =============================================================================
 
-# Private Networks Definition (dynamisch)
+# Netzwerk-Definitionen (dynamisch basierend auf Server-Konfiguration)
 define private_networks_v4 = { ${private_nets_v4} }
 define private_networks_v6 = { ${private_nets_v6} }
+define docker_networks_v4 = { ${docker_nets_v4} }
+define docker_networks_v6 = { ${docker_nets_v6} }
 
 # =============================================================================
-# HAUPTFILTER-TABELLE
+# HAUPTFILTER-TABELLE (inet = IPv4 + IPv6 kombiniert)
 # =============================================================================
 table inet filter {
 $(generate_geoip_sets_section)
 
-    # INPUT-CHAIN (mit korrekter, sicherer Regel-Reihenfolge)
+    # -------------------------------------------------------------------------
+    # INPUT-CHAIN: Eingehender Traffic zum Server
+    # -------------------------------------------------------------------------
     chain input {
-            type filter hook input priority filter; policy drop;
+        type filter hook input priority filter; policy drop;
 
-            # 1. FAST PATH: Erlaube sofort alle bekannten und laufenden Verbindungen.
-            ct state established,related accept comment "Allow-Established"
+        # STUFE 1: Performance-Optimierung - Bekannte Verbindungen sofort durchlassen
+        ct state established,related accept comment "Aktive Verbindungen"
 
-            # 2. FAIL FAST: Verwerfe sofort alle kaputten oder ungültigen Pakete.
-            ct state invalid drop comment "Drop-Invalid"
+        # STUFE 2: Sicherheit - Ungültige Pakete sofort verwerfen
+        ct state invalid drop comment "Korrupte Pakete"
 
-            # 3. TRUSTED ZONE: Erlaube explizit alle vertrauenswürdigen Quellen.
-            iifname "lo" accept comment "Allow-Loopback"
-            ip saddr \$private_networks_v4 accept comment "Allow-Private-IPv4"
-            ip6 saddr \$private_networks_v6 accept comment "Allow-Private-IPv6"
-            ${input_rules_str} # Hier sind tailscale0 und docker0 drin
+        # STUFE 3: Vertrauenswürdige Quellen - Interne und Management-Netze
+        iifname "lo" accept comment "Loopback-Interface"
+        ip saddr \$private_networks_v4 accept comment "Private IPv4-Netze"
+        ip6 saddr \$private_networks_v6 accept comment "Private IPv6-Netze"
+        $(generate_docker_input_section)
+        $(generate_tailscale_input_section)
 
-            # 4. GEO-FILTER: Schicke allen übrigen, unbekannten Traffic zur GeoIP-Prüfung.
-            $(generate_geoip_jump_section)
+        # STUFE 4: Geografische Filterung - Länder-basierte Bedrohungsabwehr
+        $(generate_geoip_jump_section)
 
-            # 5. PUBLIC SERVICES: Erlaube explizit die öffentlichen Dienste.
-            tcp dport ${SSH_PORT} accept comment "SSH-Access"
-            ip protocol icmp accept comment "ICMPv4-Ping"
-            ip6 nexthdr ipv6-icmp accept comment "ICMPv6-Ping"
+        # STUFE 5: Öffentliche Dienste - Explizit freigegebene Services
+        tcp dport ${SSH_PORT} accept comment "SSH-Zugang"
+        ip protocol icmp accept comment "IPv4 Ping"
+        ip6 nexthdr ipv6-icmp accept comment "IPv6 Ping"
     }
 
-    # FORWARD-CHAIN
+    # -------------------------------------------------------------------------
+    # FORWARD-CHAIN: Traffic zwischen Interfaces (Docker, VPN, Routing)
+    # -------------------------------------------------------------------------
     chain forward {
         type filter hook forward priority filter; policy drop;
-        ct state established,related accept comment "Allow-Established-Forward"
-        ct state invalid drop comment "Drop-Invalid-Forward"
-        ${forward_rules_str}
+        
+        # Basis-Regeln für Forwarding
+        ct state established,related accept comment "Aktive Verbindungen"
+        ct state invalid drop comment "Korrupte Pakete"
+        
+        # Container- und VPN-spezifische Forward-Regeln
+        $(generate_docker_forward_section)
+        $(generate_tailscale_forward_section)
     }
 
-    # OUTPUT-CHAIN
+    # -------------------------------------------------------------------------
+    # OUTPUT-CHAIN: Ausgehender Traffic vom Server
+    # -------------------------------------------------------------------------
     chain output {
         type filter hook output priority filter; policy accept;
+        # Ausgehender Traffic wird standardmäßig erlaubt
+        # Bei Bedarf können hier restriktive Regeln ergänzt werden
+      }
     }
-}
-
-# NAT-TABELLEN (dynamisch)
-${nat_rules_str}
+    # =============================================================================
+    # NAT-TABELLEN: Network Address Translation für Container und VPN
+    # =============================================================================
+    table ip nat {
+        chain postrouting {
+            type nat hook postrouting priority srcnat; policy accept;
+    $(generate_docker_nat_section)
+    $(generate_tailscale_nat_section)
+        }
+    }
+    table ip6 nat {
+        chain postrouting {
+            type nat hook postrouting priority srcnat; policy accept;
+    $(generate_docker_nat_section | sed 's/IPv4/IPv6/')
+    $(generate_tailscale_nat_section | sed 's/IPv4/IPv6/')
+        }
+    }
 EOF
 
-    log_ok "NFTables-Konfigurationsdatei erfolgreich geschrieben."
+    log_ok "NFTables-Konfiguration erfolgreich generiert."
     
-    # 6. Validierung
+    # Syntax-Validierung
     if ! nft -c -f /etc/nftables.conf >/dev/null 2>&1; then
-        log_error "SYNTAX-FEHLER in der generierten NFTables-Konfiguration! Firewall wird nicht geladen."
+        log_error "SYNTAX-FEHLER in der generierten NFTables-Konfiguration!"
         return 1
     fi
-    log_ok "Syntax-Check der Konfiguration erfolgreich."
+    log_ok "Syntax-Validierung erfolgreich."
 }
 
 ################################################################################
@@ -2308,7 +2341,7 @@ EOF
     fi
     
     rkhunter --update --quiet || true
-    rkhunter --propupd --quiet
+    rkhunter --propupd --quiet || true
     
     # 5. Systemd Service (journald-optimiert)
     cat > /etc/systemd/system/rkhunter-check.service << 'EOF'
@@ -3864,29 +3897,9 @@ configure_geoip_system() {
     nft add rule inet filter geoip_check ip saddr @geoip_blocked_v4 counter drop comment \"GeoIP-Block-v4\"
     nft add rule inet filter geoip_check ip6 saddr @geoip_blocked_v6 counter drop comment \"GeoIP-Block-v6\"
     
-    # 4. Jump-Regel in Input-Chain idempotent einfügen
-    if ! nft list chain inet filter input | grep -q "jump geoip_check"; then
-        log_info "  -> Integriere GeoIP-Chain in die Input-Chain..."
-        
-        # Finde den Handle der Regel, nach der wir einfügen wollen
-        local handle
-        handle=$(nft -a list chain inet filter input | grep "ct state established,related accept" | head -n 1 | awk '{print $NF}')
-        
-        if [ -n "$handle" ]; then
-            # BERECHNE die neue Position in der Shell
-            local new_position=$((handle + 1))
-            log_info "     -> Füge an Position $new_position ein (nach Handle $handle)..."
-            
-            # ÜBERGIB das fertige Ergebnis an nft
-            nft insert rule inet filter input position "$new_position" jump geoip_check comment "GeoIP-Filter"
-        else
-            # Fallback, falls die Referenz-Regel aus irgendeinem Grund nicht gefunden wird
-            log_warn "     -> Referenz-Regel nicht gefunden. Nutze Fallback und füge Regel am Anfang hinzu..."
-            nft add rule inet filter input jump geoip_check comment "GeoIP-Filter"
-        fi
-    fi
+
     
-    # 5. Timer aktivieren und erstes Update sofort ausführen
+    # 4. Timer aktivieren und erstes Update sofort ausführen
     log_info "  -> Starte GeoIP-Timer und führe initiales Update aus..."
     
     # VERWENDE run_with_spinner für besseres Feedback
@@ -4038,6 +4051,3 @@ show_usage() {
     echo -e "${BLUE}═══════════════════════════════════════════════════════════════════════════════${NC}"
 }
 main "$@"
-
-
-
