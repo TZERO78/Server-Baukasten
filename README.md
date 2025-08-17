@@ -60,8 +60,8 @@
 ## 🎯 Unterstützte Betriebssysteme
 
 - **Debian 12 (Bookworm)** - Vollständig getestet ✅
-- **Ubuntu 22.04 LTS+** - Vollständig getestet ✅
-- **Ubuntu 24.04 LTS** - Kompatibel ✅
+- **Ubuntu 22.04 LTS+** - Nicht getestet
+- **Ubuntu 24.04 LTS** - Nicht getestet
 
 ## 🚀 Quick Start
 
