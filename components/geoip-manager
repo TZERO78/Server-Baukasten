@@ -378,7 +378,7 @@ show_traffic_hits() {
 }
 
 ##
-# Testet, wie eine IP durch das GeoIP-System behandelt wird.
+# Verbesserte IP-Test-Funktion ohne nft trace
 ##
 test_ip_treatment() {
     local ip_to_test="$1"
@@ -391,39 +391,41 @@ test_ip_treatment() {
     
     print_header "IP-BEHANDLUNG TESTEN: $ip_to_test"
     
-    # Validiere IP-Format (einfache Prüfung)
-    if [[ ! "$ip_to_test" =~ ^[0-9.:a-fA-F]+$ ]]; then
-        log_error "Ungültiges IP-Format: $ip_to_test"
+    # Validiere IP-Format
+    if [[ ! "$ip_to_test" =~ ^[0-9.]+$ ]]; then
+        log_error "Ungültiges IPv4-Format: $ip_to_test"
         return 1
     fi
     
     log_info "Teste Behandlung der IP '$ip_to_test' durch das GeoIP-System..."
     echo
     
-    # Nutze nft trace für detaillierte Verfolgung
-    log_info "🔍 Führe NFT-Trace durch (simuliert eingehende TCP-Verbindung)..."
-    
-    if [[ "$ip_to_test" == *":"* ]]; then
-        # IPv6
-        log_info "Trace-Befehl: $NFT_CMD trace inet filter input ip6 saddr $ip_to_test ip6 nexthdr tcp tcp dport 22"
-        echo
-        $NFT_CMD trace inet filter input ip6 saddr "$ip_to_test" ip6 nexthdr tcp tcp dport 22 2>&1 | head -20 || {
-            log_warn "Trace-Ausgabe nicht verfügbar. Prüfe manuell mit $NFT_CMD list ruleset."
-        }
-    else
-        # IPv4
-        log_info "Trace-Befehl: $NFT_CMD trace inet filter input ip saddr $ip_to_test ip protocol tcp tcp dport 22"
-        echo
-        $NFT_CMD trace inet filter input ip saddr "$ip_to_test" ip protocol tcp tcp dport 22 2>&1 | head -20 || {
-            log_warn "Trace-Ausgabe nicht verfügbar. Prüfe manuell mit $NFT_CMD list ruleset."
-        }
+    # Test 1: Manuelle Allowlist
+    if $NFT_CMD get element inet filter geoip_allowlist_v4 "{ $ip_to_test }" >/dev/null 2>&1; then
+        echo -e "${GREEN}✅ ERLAUBT: IP ist in der manuellen Allowlist${NC}"
+        return 0
     fi
     
+    # Test 2: Heimatland-Schutz
+    if $NFT_CMD get element inet filter geoip_home_v4 "{ $ip_to_test }" >/dev/null 2>&1; then
+        echo -e "${GREEN}✅ ERLAUBT: IP gehört zum geschützten Heimatland${NC}"
+        return 0
+    fi
+    
+    # Test 3: Blockierte Länder
+    if $NFT_CMD get element inet filter geoip_blocked_v4 "{ $ip_to_test }" >/dev/null 2>&1; then
+        echo -e "${RED}🚫 BLOCKIERT: IP gehört zu einem blockierten Land${NC}"
+        return 0
+    fi
+    
+    # Test 4: Nicht in GeoIP-Sets = wird durchgelassen
+    echo -e "${CYAN}📍 DURCHGELASSEN: IP ist in keinem GeoIP-Set (vermutlich erlaubtes Land)${NC}"
+    
     echo
-    log_info "💡 Interpretation der Trace-Ausgabe:"
-    log_info "   'accept' = IP wird durchgelassen"
-    log_info "   'drop' = IP wird blockiert"
-    log_info "   'jump geoip_check' = IP durchläuft GeoIP-Prüfung"
+    log_info "💡 Ergebnis-Interpretation:"
+    log_info "   ✅ ERLAUBT = Verbindung wird akzeptiert"
+    log_info "   🚫 BLOCKIERT = Verbindung wird verworfen"
+    log_info "   📍 DURCHGELASSEN = Geht weiter zu SSH/ICMP-Regeln"
 }
 
 ##
