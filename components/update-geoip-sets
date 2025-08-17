@@ -45,11 +45,57 @@ cleanup() {
 }
 trap cleanup EXIT HUP INT TERM
 
-log_info() { echo -e "${CYAN}[INFO]${NC} $*" >&2; logger -t "$LOG_TAG" -p "daemon.info" -- "$*"; }
-log_ok() { echo -e "${GREEN}[OK]${NC} $*" >&2; logger -t "$LOG_TAG" -p "daemon.notice" -- "SUCCESS: $*"; }
-log_warn() { echo -e "${YELLOW}[WARN]${NC} $*" >&2; logger -t "$LOG_TAG" -p "daemon.warning" -- "WARN: $*"; }
-log_error() { echo -e "${RED}[ERROR]${NC} $*" >&2; logger -t "$LOG_TAG" -p "daemon.err" -- "ERROR: $*"; }
+##
+# Loggt eine normale Info-Meldung.
+##
+log_info() {
+    echo -e "${CYAN}[INFO]${NC} $*" >&2
+    if command -v logger &>/dev/null; then
+        logger -t "$LOG_TAG" -p "daemon.info" -- "$*"
+    fi
+}
 
+##
+# Loggt eine Erfolgs-Meldung.
+##
+log_ok() {
+    echo -e "${GREEN}[OK]${NC} $*" >&2
+    if command -v logger &>/dev/null; then
+        logger -t "$LOG_TAG" -p "daemon.notice" -- "SUCCESS: $*"
+    fi
+}
+
+##
+# Loggt eine Warnung.
+##
+log_warn() {
+    echo -e "${YELLOW}[WARN]${NC} $*" >&2
+    if command -v logger &>/dev/null; then
+        logger -t "$LOG_TAG" -p "daemon.warning" -- "WARN: $*"
+    fi
+}
+
+##
+# Loggt einen kritischen Fehler.
+##
+log_error() {
+    echo -e "${RED}[ERROR]${NC} $*" >&2
+    if command -v logger &>/dev/null; then
+        logger -t "$LOG_TAG" -p "daemon.err" -- "ERROR: $*"
+    fi
+}
+
+##
+# Loggt eine Debug-Meldung (nur wenn DEBUG=true).
+##
+log_debug() {
+    if [ "${DEBUG:-false}" = "true" ]; then
+        echo -e "${PURPLE}[DEBUG]${NC} $*" >&2
+        if command -v logger &>/dev/null; then
+            logger -t "$LOG_TAG" -p "daemon.debug" -- "DEBUG: $*"
+        fi
+    fi
+}
 
 
 # ═══════════════════════════════════════════════════════════════════════════
