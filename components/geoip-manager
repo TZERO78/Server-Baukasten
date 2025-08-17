@@ -173,9 +173,6 @@ get_configuration() {
 # ═══════════════════════════════════════════════════════════════════════════
 
 ##
-# Zeigt einen detaillierten Status-Überblick.
-##
-##
 # Zeigt einen detaillierten Status-Überblick mit verbesserter Fehlerbehandlung.
 ##
 show_status() {
@@ -204,17 +201,15 @@ show_status() {
     echo -e "Letzter Update-Lauf: ${CYAN}$last_run${NC}"
     echo
     
-    # NFTables-Status & Set-Inhalte (VERBESSERT)
+    # NFTables-Status & Set-Inhalte
     echo -e "${BLUE}--- Firewall-Integration & Set-Inhalte ---${NC}"
     local chain_status=$(detect_geoip_chain_status)
     
-    # Detaillierte Status-Anzeige basierend auf der korrigierten detect_geoip_chain_status()
     case "$chain_status" in
         "missing")
             echo -e "Firewall-Integration: ${RED}❌ FEHLT${NC}"
             log_error "GeoIP-Chain 'geoip_check' nicht gefunden!"
             log_error "Das GeoIP-System ist nicht korrekt installiert."
-            log_info "Lösung: Führe den Server-Baukasten erneut aus oder installiere manuell."
             return 1
             ;;
         "unintegrated")
@@ -232,92 +227,53 @@ show_status() {
             echo -e "Firewall-Integration: ${GREEN}✅ AKTIV UND FUNKTIONAL${NC}"
             log_ok "GeoIP-Blocking ist vollständig aktiviert und einsatzbereit."
             ;;
-        *)
-            echo -e "Firewall-Integration: ${RED}❌ UNBEKANNTER STATUS${NC}"
-            log_error "Unerwarteter Status: $chain_status"
-            ;;
     esac
     
-    # Set-Statistiken (mit verbesserter Fehlerbehandlung)
+    # Set-Statistiken
+    echo -e "${BLUE}--- IP-Set Statistiken ---${NC}"
     local stats=($(get_set_stats))
     local home_v4=${stats[0]:-0}
     local home_v6=${stats[1]:-0} 
     local blocked_v4=${stats[2]:-0}
     local blocked_v6=${stats[3]:-0}
     
-    # Verbesserte Set-Statistiken-Anzeige
-    echo
-    echo -e "${BLUE}--- IP-Set Statistiken ---${NC}"
-    
     # Heimatland-Sets
     if [ "$home_v4" -gt 0 ] || [ "$home_v6" -gt 0 ]; then
         echo -e "Heimatland-IPs ($home_country): ${GREEN}$home_v4 IPv4, $home_v6 IPv6${NC}"
-        if [ "$home_v4" -eq 0 ] && [ "$home_v6" -gt 0 ]; then
-            log_warn "Nur IPv6-Bereiche für Heimatland geladen (IPv4 fehlt)."
-        elif [ "$home_v4" -gt 0 ] && [ "$home_v6" -eq 0 ]; then
-            log_warn "Nur IPv4-Bereiche für Heimatland geladen (IPv6 fehlt)."
-        fi
     else
         echo -e "Heimatland-IPs ($home_country): ${RED}❌ Keine IPs geladen${NC}"
-        log_error "Heimatland-Sets sind leer! Das ist kritisch - du könntest dich aussperren."
+        log_error "Heimatland-Sets sind leer! Das ist kritisch."
     fi
     
     # Blockierte Sets
     if [ "$blocked_v4" -gt 0 ] || [ "$blocked_v6" -gt 0 ]; then
         echo -e "Blockierte IPs ($blocked_countries): ${RED}$blocked_v4 IPv4, $blocked_v6 IPv6${NC}"
-        local total_blocked=$((blocked_v4 + blocked_v6))
-        if [ "$total_blocked" -gt 1000000 ]; then
-            local millions=$((total_blocked / 1000000))
-            echo -e "  ${CYAN}💡 Insgesamt ~${millions}M IP-Bereiche werden blockiert${NC}"
-        fi
     else
         echo -e "Blockierte IPs: ${YELLOW}⚠️  Keine IPs blockiert${NC}"
         log_warn "Keine blockierten IPs geladen. GeoIP-Blocking ist inaktiv."
     fi
     
-    # Allowlist-Statistik (erweitert)
+    # Allowlist-Statistik (KORRIGIERT)
     local manual_allowlist_count=0
-    local allowlist_v4_count=0
-    local allowlist_v6_count=0
-    
     if [ -f "$ALLOWLIST_FILE" ]; then
         manual_allowlist_count=$(grep -c '^[^#]' "$ALLOWLIST_FILE" 2>/dev/null || echo "0")
     fi
     
-    # Aktuelle Allowlist-Sets prüfen
-    allowlist_v4_count=$(nft list set inet filter geoip_allowlist_v4 2>/dev/null | grep -c "^\s*[0-9]" || echo "0")
-    allowlist_v6_count=$(nft list set inet filter geoip_allowlist_v6 2>/dev/null | grep -c "::" || echo "0")
+    local allowlist_v4_count=$(nft list set inet filter geoip_allowlist_v4 2>/dev/null | grep -c "^\s*[0-9]" || echo "0")
+    local allowlist_v6_count=$(nft list set inet filter geoip_allowlist_v6 2>/dev/null | grep -c "::" || echo "0")
     
     echo -e "Manuelle Allowlist: ${CYAN}$manual_allowlist_count persistent, $allowlist_v4_count IPv4, $allowlist_v6_count IPv6 aktiv${NC}"
     
-    if [ "$manual_allowlist_count" -gt 0 ] && [ $((allowlist_v4_count + allowlist_v6_count)) -eq 0 ]; then
-        log_warn "Persistent gespeicherte Allowlist-Einträge wurden nicht in NFTables geladen."
-        log_info "Lösung: Update ausführen mit: geoip-manager update"
-    fi
-    
-    # Performance-Info bei großen Sets
-    echo
+    # Performance-Info (KORRIGIERT)
     echo -e "${BLUE}--- Performance & Empfehlungen ---${NC}"
     local total_ips=$((home_v4 + home_v6 + blocked_v4 + blocked_v6 + allowlist_v4_count + allowlist_v6_count))
     
     if [ "$total_ips" -gt 5000000 ]; then
-        log_warn "Sehr große IP-Sets ($total_ips IPs) - kann bei schwacher Hardware Performance beeinträchtigen."
-        log_info "Optimierung: Reduziere die Anzahl blockierter Länder in $COUNTRIES_FILE"
+        log_warn "Sehr große IP-Sets ($total_ips IPs) - kann Performance beeinträchtigen."
     elif [ "$total_ips" -gt 1000000 ]; then
-        log_info "Große IP-Sets ($total_ips IPs) - Performance ist normal auf modernen VPS."
+        log_info "Große IP-Sets ($total_ips IPs) - Performance ist normal auf VPS."
     else
         log_ok "Moderate IP-Set-Größe ($total_ips IPs) - optimale Performance."
-    fi
-    
-    # Letzter Update-Status
-    if command -v journalctl >/dev/null 2>&1; then
-        local last_update_status=$(journalctl -t geoip-update -n 1 --output=cat 2>/dev/null | grep -E "(SUCCESS|ERROR|WARN)" | tail -1 || echo "")
-        if [[ "$last_update_status" =~ ERROR ]]; then
-            log_warn "Letztes Update hatte Fehler: $last_update_status"
-            log_info "Prüfe Logs mit: geoip-manager logs"
-        elif [[ "$last_update_status" =~ SUCCESS ]]; then
-            log_ok "Letztes Update war erfolgreich."
-        fi
     fi
     
     echo
@@ -325,15 +281,13 @@ show_status() {
     echo -e "Manuelles Update: ${YELLOW}geoip-manager update${NC}"
     echo -e "Traffic-Statistiken: ${YELLOW}geoip-manager hits${NC}"
     echo -e "Logs anzeigen: ${YELLOW}geoip-manager logs${NC}"
-    echo -e "IP testen: ${YELLOW}geoip-manager test <IP>${NC}"
     
-    # Notfall-Befehle nur bei Problemen anzeigen
+    # Notfall-Befehle nur bei Problemen
     if [ "$chain_status" != "active" ]; then
         echo
-        echo -e "${RED}--- Notfall-Befehle (bei Problemen) ---${NC}"
+        echo -e "${RED}--- Notfall-Befehle ---${NC}"
         echo -e "Firewall neu laden: ${YELLOW}sudo nft -f /etc/nftables.conf${NC}"
         echo -e "GeoIP deaktivieren: ${YELLOW}sudo nft delete rule inet filter input jump geoip_check${NC}"
-        echo -e "Timer neu starten: ${YELLOW}sudo systemctl restart geoip-update.timer${NC}"
     fi
 }
 
