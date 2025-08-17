@@ -258,11 +258,12 @@ show_status() {
         manual_allowlist_count=$(grep -c '^[^#]' "$ALLOWLIST_FILE" 2>/dev/null | tr -d '\n\r' || echo "0")
     fi
     
-    local allowlist_v4_count=$(nft list set inet filter geoip_allowlist_v4 2>/dev/null | grep -c "^[[:space:]]*[0-9]" | tr -d '\n\r' || echo "0")
-    local allowlist_v6_count=$(nft list set inet filter geoip_allowlist_v6 2>/dev/null | grep -c "::" | tr -d '\n\r' || echo "0")
+    local allowlist_v4_count
+    allowlist_v4_count=$(nft list set inet filter geoip_allowlist_v4 2>/dev/null | grep -c "^[[:space:]]*[0-9]" | tr -d '\n\r' || echo "0")
+    local allowlist_v6_count
+    allowlist_v6_count=$(nft list set inet filter geoip_allowlist_v6 2>/dev/null | grep -c "::" | tr -d '\n\r' || echo "0")
     
-    echo -e "Manuelle Allowlist: ${CYAN}${manual_allowlist_count} persistent, ${allowlist_v4_count} IPv4, ${allowlist_v6_count} IPv6 aktiv${NC}"
-    
+    echo -e "Manuelle Allowlist: ${CYAN}${manual_allowlist_count} persistent, ${allowlist_v4_count} IPv4, ${allowlist_v6_count} IPv6 aktiv${NC}"    
     # Performance-Info (KORRIGIERT - verhindert Syntaxfehler)
     echo -e "${BLUE}--- Performance & Empfehlungen ---${NC}"
     local total_ips=$(( home_v4 + home_v6 + blocked_v4 + blocked_v6 + allowlist_v4_count + allowlist_v6_count ))
