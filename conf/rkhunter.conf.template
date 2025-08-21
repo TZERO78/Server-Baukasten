@@ -1,0 +1,68 @@
+# RKHunter Configuration v2.0 - Community Best Practices
+# Kompatibel mit Debian/Ubuntu
+# ═══════════════════════════════════════════════════════════════════════════
+# UPDATES & MIRRORS
+# ═══════════════════════════════════════════════════════════════════════════
+UPDATE_MIRRORS=1
+MIRRORS_MODE=0
+WEB_CMD=""
+
+# ═══════════════════════════════════════════════════════════════════════════
+# SYSTEM PATHS (Debian-Standards)
+# ═══════════════════════════════════════════════════════════════════════════
+INSTALLDIR=/usr
+SCRIPTDIR=/usr/share/rkhunter/scripts
+TMPDIR=/var/lib/rkhunter/tmp
+DBDIR=/var/lib/rkhunter/db
+BINDIR=/usr/bin
+
+# ═══════════════════════════════════════════════════════════════════════════
+# LOGGING (journald-kompatibel)
+# ═══════════════════════════════════════════════════════════════════════════
+LOGFILE=/var/log/rkhunter.log
+APPEND_LOG=1
+USE_SYSLOG=authpriv.notice
+COPY_LOG_ON_ERROR=0
+
+# ═══════════════════════════════════════════════════════════════════════════
+# SCAN CONFIGURATION
+# ═══════════════════════════════════════════════════════════════════════════
+
+# Rootkit scanning mode (empty = standard mode, THOROUGH = deep scan)
+# Official docs: "SHOULD NOT BE ENABLED BY DEFAULT"
+#SCANROOTKITMODE=THOROUGH
+
+# Package manager integration (Debian best practice)
+PKGMGR=DPKG
+
+# Hash function (standard für Debian/Ubuntu)
+HASH_CMD=sha256sum
+
+# ═══════════════════════════════════════════════════════════════════════════
+# SSH SECURITY
+# ═══════════════════════════════════════════════════════════════════════════
+ALLOW_SSH_ROOT_USER=no
+ALLOW_SSH_PROT_V1=2
+
+# ═══════════════════════════════════════════════════════════════════════════
+# WHITELISTS (Only essential ones)
+# ═══════════════════════════════════════════════════════════════════════════
+SCRIPTWHITELIST=/usr/bin/groups
+SCRIPTWHITELIST=/usr/bin/ldd
+SCRIPTWHITELIST=/usr/bin/which
+SCRIPTWHITELIST=/usr/bin/egrep
+SCRIPTWHITELIST=/usr/bin/fgrep
+
+ALLOWHIDDENDIR=/etc/.git
+ALLOWHIDDENFILE=/etc/.pwd.lock
+# VPS-specific: Allow DHCP client
+ALLOWPROCLISTEN=/sbin/dhclient
+
+# ═══════════════════════════════════════════════════════════════════════════
+# PERFORMANCE (VPS-friendly)  
+# ═══════════════════════════════════════════════════════════════════════════
+DISABLE_TESTS=suspscan
+
+# ═══════════════════════════════════════════════════════════════════════════
+# MAIL NOTIFICATIONS (added below if enabled)
+# ═══════════════════════════════════════════════════════════════════════════
