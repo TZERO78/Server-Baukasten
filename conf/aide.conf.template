@@ -1,1 +1,178 @@
+# AIDE Configuration - Community Best Practices
+# Based on production server experience and security recommendations
 
+# ═══════════════════════════════════════════════════════════════════════════
+# DATABASE CONFIGURATION
+# ═══════════════════════════════════════════════════════════════════════════
+database_in=file:/var/lib/aide/aide.db
+database_out=file:/var/lib/aide/aide.db.new
+database_new=file:/var/lib/aide/aide.db.new
+
+# ═══════════════════════════════════════════════════════════════════════════
+# LOGGING & OUTPUT (journald-optimized)
+# ═══════════════════════════════════════════════════════════════════════════
+log_level=info
+
+# Primary output: journald (structured logging)
+report_url=syslog:LOG_LOCAL0
+
+# Backup: Traditional logfile (fallback)
+report_url=file:/var/log/aide/aide.log
+
+# Gzip compression for file reports (space-efficient)
+gzip_dbout=yes
+
+# ═══════════════════════════════════════════════════════════════════════════
+# RULE DEFINITIONS (Security-focused)
+# ═══════════════════════════════════════════════════════════════════════════
+
+# Full monitoring (critical system files)
+Full = p+i+n+u+g+s+b+m+c+md5+sha1+sha256+rmd160
+
+# Monitor permissions and ownership only (large directories)
+Perms = p+i+u+g
+
+# Monitor content changes (config files)
+Content = p+i+n+u+g+s+b+m+c+md5+sha256
+
+# Monitor only metadata (logs, temp files)
+Metadata = p+i+n+u+g
+
+# Static files (never change after installation)
+Static = p+i+n+u+g+s+b+m+c+md5+sha1+sha256+rmd160
+
+# ═══════════════════════════════════════════════════════════════════════════
+# CRITICAL SYSTEM FILES (Full monitoring)
+# ═══════════════════════════════════════════════════════════════════════════
+
+# Boot and kernel
+/boot Full
+/lib/modules Full
+
+# System binaries (critical)
+/bin Full
+/sbin Full
+/usr/bin Full
+/usr/sbin Full
+/usr/local/bin Full
+/usr/local/sbin Full
+
+# Critical libraries
+/lib Full
+/usr/lib Full
+
+# ═══════════════════════════════════════════════════════════════════════════
+# CONFIGURATION FILES (Content monitoring)
+# ═══════════════════════════════════════════════════════════════════════════
+
+# System configuration
+/etc Content
+
+# SSH configuration (extra important)
+/etc/ssh Content
+
+# Network configuration
+/etc/network Content
+/etc/systemd/network Content
+
+# Security configurations
+/etc/security Content
+/etc/pam.d Content
+/etc/sudoers Content
+/etc/sudoers.d Content
+
+# ═══════════════════════════════════════════════════════════════════════════
+# USER DATA (Selective monitoring)
+# ═══════════════════════════════════════════════════════════════════════════
+
+# Root home (important)
+/root Content
+
+# User homes (metadata only - privacy vs security balance)
+/home Perms
+
+# ═══════════════════════════════════════════════════════════════════════════
+# SYSTEM DIRECTORIES (Metadata monitoring)
+# ═══════════════════════════════════════════════════════════════════════════
+
+# Important directories
+/opt Perms
+/srv Perms
+/usr/share Perms
+
+# Custom script directories (important for security)
+/opt/scripts Content
+
+# ═══════════════════════════════════════════════════════════════════════════
+# EXCLUSIONS (Reduce noise and improve performance)
+# ═══════════════════════════════════════════════════════════════════════════
+
+# Temporary and cache directories
+!/tmp
+!/var/tmp
+!/var/cache
+!/var/lib/apt/lists
+!/var/lib/dpkg/info
+
+# Logs (change constantly)
+!/var/log
+!/var/spool
+
+# Runtime directories
+!/run
+!/var/run
+!/sys
+!/proc
+!/dev
+
+# Docker (if present)
+!/var/lib/docker
+
+# Package manager
+!/var/lib/dpkg/lock
+!/var/lib/dpkg/lock-frontend
+!/var/cache/apt/archives
+
+# Mail
+!/var/mail
+!/var/spool/mail
+
+# User-specific excludes
+!/home/.*/\.cache
+!/home/.*/\.local/share/Trash
+!/home/.*/\.mozilla/firefox/.*/Cache
+!/home/.*/\.thumbnails
+
+# systemd
+!/var/lib/systemd/random-seed
+!/var/lib/systemd/catalog/database
+!/etc/machine-id
+
+# Network Manager
+!/etc/NetworkManager/system-connections
+
+# Certificate updates
+!/etc/ssl/certs/ca-certificates.crt
+
+# Time-based files
+!/etc/adjtime
+!/etc/localtime
+
+# ═══════════════════════════════════════════════════════════════════════════
+# SPECIAL CASES (Server-specific)
+# ═══════════════════════════════════════════════════════════════════════════
+
+# Web server (if present)
+/var/www Content
+
+# Database (metadata only - data changes frequently)
+/var/lib/mysql Perms
+/var/lib/postgresql Perms
+
+# Application configs
+/usr/local/etc Content
+
+# Backup directories
+/backup Perms
+/var/backups Perms
+EOF
