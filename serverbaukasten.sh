@@ -17,7 +17,6 @@
 #        extrem sicheren und modernen Standard ein.
 #
 # USAGE:
-#   Interaktiv: sudo ./serverbaukasten.sh
 #   Automatisch: sudo ./serverbaukasten.sh -c /pfad/zur/config.conf
 #   Hilfe:      sudo ./serverbaukasten.sh -h
 ################################################################################
@@ -28,12 +27,13 @@
 set -e
 set -o pipefail
 
-readonly SCRIPT_VERSION="1.0"
+readonly SCRIPT_VERSION="3.0"
 readonly CROWDSEC_MAXRETRY_DEFAULT=5
 readonly CROWDSEC_BANTIME_DEFAULT="48h" 
 readonly SSH_PORT_DEFAULT=22
 readonly NOTIFICATION_EMAIL_DEFAULT="admin@example.com"  # Generic für Community
 readonly COMPONENTS_BASE_URL="https://raw.githubusercontent.com/TZERO78/Server-Baukasten/main/components"
+readonly CONF_BASE_URL="https://raw.githubusercontent.com/TZERO78/Server-Baukasten/main/conf"
 
 # Globale Verbose/Debug-Variablen
 declare -g SCRIPT_VERBOSE=false
@@ -52,21 +52,6 @@ CONFIG_FILE=""
 #                                  UI-HELFER
 #
 ################################################################################
-
-##
-# Gibt einen formatierten Header für einen Abschnitt in der Konsole aus.
-# @param string $1 Schrittnummer (z.B. "1").
-# @param string $2 Titel des Abschnitts.
-# @param string $3 Icon für den Abschnitt.
-##
-print_section_header() {
-    local step="$1" title="$2" icon="$3"
-    local padding_size=$((60 - ${#title} - ${#step}))
-    local padding; printf -v padding '%*s' $padding_size
-    echo -e "\n${BLUE}┌─────────────────────────────────────────────────────────────────────────────┐${NC}"
-    echo -e "${BLUE}│ ${icon}   SCHRITT ${step}:   ${title}${padding}│${NC}"
-    echo -e "${BLUE}└─────────────────────────────────────────────────────────────────────────────┘${NC}"
-}
 
 ##
 # Fragt den Benutzer nach einer Ja/Nein-Antwort und speichert das Ergebnis.
@@ -90,81 +75,18 @@ prompt_for_yes_no() {
 }
 
 ##
-# Fragt den Benutzer nach einer Texteingabe und validiert diese.
-# @param string $1 Die Frage, die dem Benutzer gestellt wird.
-# @param string $2 Der Name der Variable, in der die Eingabe gespeichert wird.
-# @param string $3 Der Standardwert.
-# @param string $4 Der Name der Validierungsfunktion (z.B. "is_valid_email").
-# @param string $5 Die Fehlermeldung bei ungültiger Eingabe.
+# Gibt einen formatierten Header für einen Abschnitt in der Konsole aus.
+# @param string $1 Schrittnummer (z.B. "1").
+# @param string $2 Titel des Abschnitts.
+# @param string $3 Icon für den Abschnitt.
 ##
-prompt_for_validated_input() {
-    local prompt="$1" var_name="$2" default="$3" validator="$4" error_msg="$5"
-    local input
-    while true; do
-        read -p "$(echo -e "${CYAN}›${NC}") $prompt (Standard: $default, Enter für Standard): " input
-        if [ -z "$input" ]; then input="$default"; fi
-
-        if $validator "$input"; then
-            eval "$var_name=\"$input\""
-            break
-        else
-            echo -e "${RED}  $error_msg${NC}"
-        fi
-    done
-}
-
-##
-# Fragt den Benutzer nach einer Auswahl aus einer nummerierten Liste.
-# @param string $1 Die Frage, die dem Benutzer gestellt wird.
-# @param string $2 Der Name der Variable, in der die Auswahl (Index) gespeichert wird.
-# @param string $3 Der Standard-Index.
-# @param array  $@ Die Liste der Optionen.
-##
-prompt_for_choice() {
-    local prompt="$1" var_name="$2" default="$3"
-    shift 3
-    local options=("$@")
-    local choice
-
-    echo -e "${CYAN}›${NC} $prompt"
-    for i in "${!options[@]}"; do
-        echo -e "     ${PURPLE}$((i+1)))${NC} ${options[$i]}"
-    done
-
-    while true; do
-        read -p "   Auswahl (Standard: $default, Enter für Standard): " choice
-        if [ -z "$choice" ]; then choice="$default"; fi
-        
-        if [[ "$choice" -ge 1 && "$choice" -le ${#options[@]} ]]; then
-            eval "$var_name=$choice"
-            break
-        else
-            echo -e "${RED}  Ungültige Auswahl. Bitte eine Zahl zwischen 1 und ${#options[@]} eingeben.${NC}"
-        fi
-    done
-}
-
-##
-# Fragt den Benutzer nach einem Passwort mit Längenprüfung und Bestätigung.
-# @param string $1 Die Aufforderung für das Passwort.
-# @param string $2 Der Name der Variable, in der das Passwort gespeichert wird.
-##
-prompt_for_password() {
-    local prompt="$1" var_name="$2"
-    local pass pass_confirm
-    while true; do
-        read -s -p "$(echo -e "${CYAN}›${NC}") $prompt (mind. 8 Zeichen): " pass; echo
-        if [ ${#pass} -lt 8 ]; then
-            echo -e "${RED}  Passwort zu kurz!${NC}"; continue
-        fi
-        read -s -p "$(echo -e "${CYAN}›${NC}") Passwort wiederholen: " pass_confirm; echo
-        if [ "$pass" = "$pass_confirm" ]; then
-            eval "$var_name=\"$pass\""
-            break
-        else
-            echo -e "${RED}  Passwörter stimmen nicht überein!${NC}"
-        fi
-    done
+print_section_header() {
+    local step="$1" title="$2" icon="$3"
+    local padding_size=$((60 - ${#title} - ${#step}))
+    local padding; printf -v padding '%*s' $padding_size
+    echo -e "\n${BLUE}┌─────────────────────────────────────────────────────────────────────────────┐${NC}"
+    echo -e "${BLUE}│ ${icon}   SCHRITT ${step}:   ${title}${padding}│${NC}"
+    echo -e "${BLUE}└─────────────────────────────────────────────────────────────────────────────┘${NC}"
 }
 
 ##
@@ -207,92 +129,6 @@ print_summary_warning() {
 }
 
 ##
-# Eine verbesserte Passwort-Eingabe mit visueller Bestätigung und Bearbeitungsoption.
-# @param string $1 Die Aufforderung für das Passwort.
-# @param string $2 Der Name der Variable, in der das Passwort gespeichert wird.
-##
-prompt_for_password_with_confirmation() {
-    local prompt="$1"
-    local var_name="$2"
-    local password=""
-    local confirm=""
-    
-    while true; do
-        # Passwort eingeben
-        read -srp "$(echo -e "${CYAN}›${NC} $prompt: ")" password
-        echo
-        
-        # Passwort bestätigen
-        read -srp "$(echo -e "${CYAN}›${NC} Passwort wiederholen: ")" confirm
-        echo
-        
-        # Prüfe ob Passwörter übereinstimmen
-        if [ "$password" = "$confirm" ]; then
-            # Zeige Passwort für 10 Sekunden zur Bestätigung
-            echo -e "\n${YELLOW}📋 Eingegebenes Passwort (wird 10 Sekunden angezeigt):${NC}"
-            echo -e "${CYAN}$password${NC}"
-            echo -e "${YELLOW}⏰ Passwort korrekt? Wird in 10 Sekunden ausgeblendet...${NC}"
-            
-            # Countdown mit Interrupt-Möglichkeit
-            local countdown=10
-            local user_choice=""
-            
-            while [ $countdown -gt 0 ]; do
-                printf "\r${YELLOW}⏰ Automatische Übernahme in %d Sekunden... (j=Ja, n=Nein, Enter=Bearbeiten): ${NC}" $countdown
-                
-                # Prüfe auf User-Input mit 1-Sekunden-Timeout
-                if read -t 1 -n 1 user_choice 2>/dev/null; then
-                    echo  # Neue Zeile nach Input
-                    break
-                fi
-                ((countdown--))
-            done
-            
-            # Bildschirm kurz leeren (Passwort verstecken)
-            printf "\033[2K\r"  # Lösche aktuelle Zeile
-            printf "\033[1A\033[2K\r"  # Lösche vorherige Zeile
-            printf "\033[1A\033[2K\r"  # Lösche Passwort-Zeile
-            
-            # Verarbeite User-Choice
-            case "$user_choice" in
-                "j"|"J"|"")  # Ja oder Timeout = Akzeptieren
-                    eval "$var_name=\"$password\""
-                    echo -e "${GREEN}✅ Passwort akzeptiert und gespeichert.${NC}"
-                    return 0
-                    ;;
-                "n"|"N")  # Nein = Neu eingeben
-                    echo -e "${YELLOW}🔄 Passwort wird neu eingegeben...${NC}"
-                    continue
-                    ;;
-                *)  # Enter oder andere Taste = Bearbeiten
-                    echo -e "${CYAN}📝 Passwort bearbeiten:${NC}"
-                    local edited_password
-                    read -rp "$(echo -e "${CYAN}›${NC} Bearbeitetes Passwort: ")" -i "$password" edited_password
-                    password="$edited_password"
-                    eval "$var_name=\"$password\""
-                    echo -e "${GREEN}✅ Bearbeitetes Passwort gespeichert.${NC}"
-                    return 0
-                    ;;
-            esac
-        else
-            echo -e "${RED}❌ Passwörter stimmen nicht überein. Bitte erneut eingeben.${NC}"
-        fi
-    done
-}
-
-##
-# Fragt nach SMTP-Benutzerdaten, falls SMTP-Authentifizierung aktiviert ist.
-##
-prompt_for_smtp_credentials() {
-    if [ "$SMTP_AUTH" = "ja" ]; then
-        read -p "$(echo -e "${CYAN}›${NC}   👤 SMTP-Benutzername: ")" SMTP_USER
-        
-        # Verwende verbesserte Passwort-Eingabe
-        prompt_for_password_with_confirmation "🔑 SMTP-Passwort" "SMTP_PASSWORD"
-    fi
-}
-
-##
 # Gibt die Fingerprints der SSH-Host-Schlüssel aus.
 ##
 print_ssh_host_keys() {
@@ -305,7 +141,6 @@ print_ssh_host_keys() {
         fi
     done
 }
-
 
 ##
 # Führt einen Befehl aus. Zeigt im Normalmodus einen Spinner und bei Fehlern die
@@ -712,11 +547,18 @@ cleanup_admin_sudo_rights_emergency() {
     fi
 }
 
-
 ##
 # Bietet an, die Konfigurationsdatei mit sensiblen Daten am Ende des Skripts sicher zu löschen.
 ##
 cleanup_sensitive_data() {
+    local TEST_MODE="$1"
+
+    # Prüfe, ob der Test-Modus aktiv ist
+    if [ "$TEST_MODE" = true ]; then
+        log_warn "TEST-MODUS: Überspringe Bereinigung der sensiblen Konfigurationsdatei."
+        return 0
+    fi
+
     if [ -n "$CONFIG_FILE" ] && [ -f "$CONFIG_FILE" ]; then
         print_section_header "SICHERHEIT" "SENSIBLE DATEN BEREINIGEN" "🔒"
         
@@ -733,12 +575,11 @@ cleanup_sensitive_data() {
                 else
                     log_warn "Sicheres Löschen mit 'shred' fehlgeschlagen. Nutze 'rm' als Fallback."
                     rm -f "$CONFIG_FILE"
-                    log_info "Konfigurationsdatei gelöscht (möglicherweise wiederherstellbar)."
                 fi
             else
                 log_warn "'shred' ist nicht installiert. Nutze 'rm' als Fallback."
                 rm -f "$CONFIG_FILE"
-                log_info "Konfigurationsdatei gelöscht (möglicherweise wiederherstellbar)."
+                log_ok "Konfigurationsdatei gelöscht (möglicherweise wiederherstellbar)."
             fi
         else
             log_error "KONFIGURATIONSDATEI WURDE NICHT GELÖSCHT!"
@@ -748,6 +589,45 @@ cleanup_sensitive_data() {
     else
         log_info "Keine Konfigurationsdatei verwendet, keine sensiblen Daten zu bereinigen."
     fi
+}
+
+##
+# Lädt eine Konfigurations-Vorlage von GitHub herunter, ersetzt Variablen (falls vorhanden)
+# und setzt die korrekten Berechtigungen.
+# @param string $1 Name der Vorlage auf GitHub (z.B. "aide.conf.template").
+# @param string $2 Zieldatei auf dem Server (z.B. "/etc/aide/aide.conf").
+# @param string $3 Oktale Dateiberechtigungen (z.B. "640").
+# @param string $4 Besitzer und Gruppe (z.B. "root:root").
+##
+download_and_process_template() {
+    local template_name="$1"
+    local dest_path="$2"
+    local permissions="$3"
+    local owner="$4"
+    
+    local source_url="${CONF_BASE_URL}/${template_name}"
+    local temp_file
+    temp_file=$(mktemp)
+
+    if ! run_with_spinner "Lade Vorlage '$template_name'..." "curl -fsSL '$source_url' -o '$temp_file'"; then
+        log_error "Download der Vorlage '$template_name' ist fehlgeschlagen."
+        rm -f "$temp_file"
+        return 1
+    fi
+    
+    # Erstelle Zielverzeichnis, falls es nicht existiert
+    mkdir -p "$(dirname "$dest_path")"
+    
+    # Ersetze alle ${VARIABLE} Platzhalter und schreibe die finale Datei.
+    # Funktioniert auch, wenn keine Variablen zu ersetzen sind.
+    envsubst < "$temp_file" > "$dest_path"
+    rm -f "$temp_file"
+    
+    # Setze Berechtigungen und Besitzer
+    chmod "$permissions" "$dest_path"
+    chown "$owner" "$dest_path"
+    
+    log_ok "Vorlage '$template_name' erfolgreich nach '$dest_path' installiert."
 }
 
 ###########################################################################################
@@ -914,42 +794,49 @@ setup_geoip_protection() {
 }
 
 ##
-# MODUL 5: Installiert, konfiguriert und initialisiert das
-#          System-Integritäts-Monitoring (AIDE & RKHunter).
+# MODUL: Installiert, konfiguriert und initialisiert das
+#        System-Integritäts-Monitoring (AIDE & RKHunter).
 ##
 setup_integrity_monitoring() {
     local TEST_MODE="$1"
     log_info "📊 MODUL: System-Integritäts-Monitoring"
 
+    # TEST-MODUS: Dieses Modul ist sehr zeitaufwändig und wird daher komplett übersprungen.
     if [ "$TEST_MODE" = true ]; then
         log_warn "TEST-MODUS: Überspringe Integritäts-Monitoring komplett (AIDE & RKHunter)."
-        log_info "  💡 Grund: Zeitaufwändige Installation, Konfiguration und DB-Initialisierung."
         return 0
     fi
 
-    # --- Schritt 1/3: Basispakete installieren ---
-    log_info "  -> 1/3: Installiere Basispakete (aide, rkhunter)..."
+    # --- Schritt 1/4: Basispakete installieren ---
+    log_info "  -> 1/4: Installiere Basispakete..."
     run_with_spinner "Installiere aide & rkhunter..." "apt-get install -y aide rkhunter"
 
-    # --- Schritt 2/3: Tools konfigurieren ---
-    log_info "  -> 2/3: Konfiguriere Tools (systemd-Timer, .conf-Dateien)..."
+    # --- Schritt 2/4: Tools konfigurieren (legt .conf-Dateien und Timer an) ---
+    log_info "  -> 2/4: Konfiguriere AIDE und RKHunter..."
     configure_aide
     configure_rkhunter
 
-    # --- Schritt 3/3: Datenbanken initialisieren ---
-    log_info "  -> 3/3: Initialisiere Datenbanken und Properties..."
-    # AIDE-Datenbank initialisieren
+    # --- Schritt 3/4: Datenbanken einmalig initialisieren ---
+    log_info "  -> 3/4: Initialisiere Datenbanken (dies kann einige Minuten dauern)..."
     if run_with_spinner "Initialisiere AIDE-Datenbank..." "/usr/bin/aide --config /etc/aide/aide.conf --init"; then
         mv /var/lib/aide/aide.db.new /var/lib/aide/aide.db
         log_ok "AIDE-Datenbank erfolgreich initialisiert."
     else
-        log_warn "AIDE-Initialisierung fehlgeschlagen."
+        log_warn "AIDE-Initialisierung fehlgeschlagen. Der Timer wird es später erneut versuchen."
     fi
     
-    # RKHunter-Properties aktualisieren
-    run_with_spinner "Aktualisiere RKHunter-Properties..." "rkhunter --propupd"
+    run_with_spinner "Aktualisiere RKHunter-Properties..." "rkhunter --propupd --quiet || true"
 
-    log_ok "Integritäts-Monitoring mit journald konfiguriert."
+    # --- Schritt 4/4: Timer für den regulären Betrieb starten ---
+    log_info "  -> 4/4: Starte die Timer für die regelmäßigen Scans..."
+    if ! run_with_spinner "Starte AIDE-Timer..." "systemctl start aide-check.timer"; then
+        log_warn "AIDE-Timer konnte nicht gestartet werden."
+    fi
+    if ! run_with_spinner "Starte RKHunter-Timer..." "systemctl start rkhunter-check.timer"; then
+        log_warn "RKHunter-Timer konnte nicht gestartet werden."
+    fi
+
+    log_ok "Integritäts-Monitoring konfiguriert und Timer gestartet."
 }
 
 ##
@@ -1452,17 +1339,21 @@ EOF
 ##
 # Haupt-Einstiegspunkt des Skripts. Verarbeitet Argumente und startet das Setup.
 ##
+##
+# Haupt-Einstiegspunkt des Skripts. Verarbeitet Argumente und startet das Setup.
+##
 main() {
     check_root
 
     # --- Argumente verarbeiten ---
     local TEST_MODE=false
-    CONFIG_FILE="" # Sicherstellen, dass die Variable am Anfang leer ist
+    CONFIG_FILE=""
     
+    # KORRIGIERT: -t für Test-Modus hinzugefügt
     while getopts ":c:thvd" opt; do
         case ${opt} in
             c) CONFIG_FILE=$OPTARG;;
-            t) TEST_MODE=true;;
+            t) TEST_MODE=true;; # <-- DIESE ZEILE HAT GEFEHLT
             h) show_usage; exit 0;;
             v) SCRIPT_VERBOSE=true;;
             d) DEBUG=true; SCRIPT_VERBOSE=true;;
@@ -1471,10 +1362,14 @@ main() {
         esac
     done
 
-    # Globale Flags für andere Funktionen und Kind-Prozesse verfügbar machen
-    export SCRIPT_VERBOSE DEBUG
+    # PRÜFUNG: Config-Datei ist jetzt Pflicht!
+    if [ -z "$CONFIG_FILE" ]; then
+        log_error "Keine Konfigurationsdatei angegeben."
+        show_usage
+        exit 1
+    fi
 
-    # --- Skript-Ausführung ---
+    export SCRIPT_VERBOSE DEBUG
     trap 'rollback' ERR
 
     log_info "🚀 Starte Server-Baukasten v$SCRIPT_VERSION..."
@@ -1490,9 +1385,16 @@ main() {
     # Fehlerfalle nach erfolgreichem Setup deaktivieren
     trap - ERR
     
+    # Sicherheits-Cleanup VOR der Zusammenfassung
+    cleanup_sensitive_data "$TEST_MODE"
+
     show_summary
     
-    log_ok "Server-Setup erfolgreich abgeschlossen!"
+    if [ "$TEST_MODE" = true ]; then
+        log_ok "Test-Setup erfolgreich abgeschlossen! ⚡"
+    else
+        log_ok "Server-Setup erfolgreich abgeschlossen! 🎉"
+    fi
 }
 
 ##
@@ -1503,14 +1405,10 @@ run_setup() {
     local TEST_MODE="$1"
     
     # --- Phase 1: Vorbereitung ---
-    log_info "Phase 1/5: Vorbereitung (Checks, Cleanup, Konfiguration)..."
+    log_info "Phase 1/5: Vorbereitung..."
     pre_flight_checks
     module_cleanup
-    if [ -n "$CONFIG_FILE" ]; then
-        load_config_from_file "$CONFIG_FILE"
-    else
-        collect_config
-    fi
+    load_config_from_file "$CONFIG_FILE"
 
     # --- Phase 2: System-Fundament ---
     log_info "Phase 2/5: System-Fundament (OS, Pakete, Kernel)..."
@@ -1538,7 +1436,6 @@ run_setup() {
     log_info "Phase 5/5: Abschluss-Arbeiten (Mail, Logs, Backup, Verifikation)..."
     module_mail_setup
     module_journald_optimization
-    module_services "$TEST_MODE"
     module_verify_setup
     cleanup_admin_sudo_rights
 }
@@ -1641,480 +1538,35 @@ load_config_from_file() {
     log_ok "Alle Validierungen bestanden - Setup kann beginnen!"
 }
 
-##
-# Führt den interaktiven Konfigurationsdialog durch.
-##
-collect_config() {
-    clear
-    # UI-Elemente bleiben echo-Befehle, um das Journal nicht zu füllen
-    echo -e "${BLUE}Willkommen zum Server-Baukasten! (v$SCRIPT_VERSION)${NC}"
-    echo "Dieses Skript führt Sie durch die Einrichtung Ihres neuen Servers."
-    
-    print_section_header "1" "Server-Identität & Accounts" "👤"
-    prompt_for_validated_input "Hostname des Servers" "SERVER_HOSTNAME" "$(hostname)" "is_valid_hostname" "Ungültiger Hostname!"
-    prompt_for_validated_input "Admin-Benutzername" "ADMIN_USER" "admin" "is_valid_username" "Ungültiger Benutzername (a-z, 0-9, _, -)."
-    prompt_for_password "Passwort für '$ADMIN_USER'" "ADMIN_PASSWORD"
-    prompt_for_password "Passwort für 'root' (Notfallzugang)" "ROOT_PASSWORD"
-
-    print_section_header "2" "Netzwerk & SSH-Sicherheit" "🌐"
-    local access_options=("Nur über VPN (Tailscale) - Max. Sicherheit" "Öffentlich erreichbar")
-    prompt_for_choice "Wie soll der Server erreichbar sein?" "ACCESS_MODEL" "1" "${access_options[@]}"
-    prompt_for_validated_input "SSH-Port" "SSH_PORT" "$SSH_PORT_DEFAULT" "is_valid_port" "Bitte eine Portnummer zwischen 1025 und 65535 eingeben."
-
-    read -p "$(echo -e "${CYAN}›${NC}") Öffentlichen SSH-Schlüssel einfügen (optional, Enter überspringt): " SSH_PUBLIC_KEY
-    if [ -n "$SSH_PUBLIC_KEY" ]; then
-        while ! is_valid_ssh_pubkey "$SSH_PUBLIC_KEY"; do
-            # KORRIGIERT: Fehler mit log_error ausgeben
-            log_error "Ungültiger SSH Public Key."
-            read -p "$(echo -e "${CYAN}›${NC}") Erneut einfügen (oder Enter zum Abbrechen): " SSH_PUBLIC_KEY
-            if [ -z "$SSH_PUBLIC_KEY" ]; then break; fi
-        done
-    fi
-
-    print_section_header "3" "System-Lokalisierung (wichtig für Geo-Schutz!)" "🌍"
-    # UI-Hinweise bleiben echo-Befehle
-    echo -e "  ${BLUE}💡 Hinweis: Diese Einstellung wird auch für den automatischen Geo-Schutz verwendet${NC}"
-    echo -e "  ${BLUE}   Ihr Heimatland wird basierend auf der Locale automatisch vor Blockierung geschützt${NC}\n"
-    
-    prompt_for_validated_input "Zeitzone" "TIMEZONE" "Europe/Berlin" "is_valid_timezone" "Ungültige Zeitzone!"
-    local locale_options=("Deutsch (de_DE.UTF-8) → Deutschland wird geo-geschützt" "Englisch (en_US.UTF-8) → USA wird geo-geschützt")
-    prompt_for_choice "Systemsprache & Geo-Schutz" "LOCALE_CHOICE" "1" "${locale_options[@]}"
-    
-    # KORRIGIERT: Wichtige automatische Entscheidungen protokollieren
-    if [ "$LOCALE_CHOICE" = "1" ]; then 
-        LOCALE="de_DE.UTF-8"
-        AUTO_HOME_COUNTRY="DE"
-        log_info "Automatisch erkannt: Deutschland (DE) wird geo-geschützt."
-    else 
-        LOCALE="en_US.UTF-8" 
-        AUTO_HOME_COUNTRY="US"
-        log_info "Automatisch erkannt: USA (US) wird geo-geschützt."
-    fi
-    print_section_header "4" "Intrusion Prevention (CrowdSec)" "🛡️"
-    prompt_for_validated_input "SSH-Fehlversuche bis zum Ban" "CROWDSEC_MAXRETRY" "$CROWDSEC_MAXRETRY_DEFAULT" "is_numeric" "Bitte eine Zahl eingeben."
-    read -p "$(echo -e "${CYAN}›${NC}") Sperrdauer für Angreifer (z.B. 12h, Standard: $CROWDSEC_BANTIME_DEFAULT): " CROWDSEC_BANTIME
-    CROWDSEC_BANTIME=${CROWDSEC_BANTIME_DEFAULT:-$CROWDSEC_BANTIME_DEFAULT}
-
-    print_section_header "5" "Geo-IP-Blocking (Länder-basierte Bedrohungsabwehr)" "🌍"
-    
-    echo -e "  ${BLUE}💡 Hintergrund: Statistisch stammen >80% der Brute-Force-Angriffe aus wenigen Ländern${NC}"
-    echo -e "  ${BLUE}   SSH-Scans, Botnet-Traffic und Credential-Stuffing konzentrieren sich auf bestimmte Regionen${NC}"
-    echo ""
-    echo -e "  ${GREEN}🏠 Ihr Heimatland wird automatisch geschützt: ${AUTO_HOME_COUNTRY} (aus Locale ${LOCALE})${NC}"
-    echo -e "  ${CYAN}   Dieses Land wird NIE blockiert, auch nicht bei Updates der IP-Listen${NC}"
-    echo ""
-    
-    prompt_for_yes_no "GeoIP-Blocking aktivieren (blockiert Angriffe aus Risiko-Ländern)?" "ENABLE_GEOIP_BLOCKING" "ja"
-    
-    if [ "$ENABLE_GEOIP_BLOCKING" = "ja" ]; then
-        echo -e "\n  ${PURPLE}--- Länder-basiertes Blocking-System ---${NC}"
-        echo -e "  ${YELLOW}⚠️  Hinweis: Lokale Netze, VPN-Verbindungen und $AUTO_HOME_COUNTRY werden nie blockiert${NC}"
-        echo ""
-        
-        # Heimatland-Bestätigung
-        local confirm_home_country
-        prompt_for_yes_no "  Ist $AUTO_HOME_COUNTRY korrekt als Ihr Heimatland?" "confirm_home_country" "ja"
-        
-        if [ "$confirm_home_country" = "ja" ]; then
-            HOME_COUNTRY="$AUTO_HOME_COUNTRY"
-            log_info "Heimatland bestätigt: $HOME_COUNTRY wird permanent geschützt"
-        else
-            echo -e "\n  ${BLUE}📋 Häufige Länder-Codes für manuelle Eingabe:${NC}"
-            echo -e "    ${CYAN}DE=Deutschland, AT=Österreich, CH=Schweiz, US=USA, GB=Großbritannien${NC}"
-            echo -e "    ${CYAN}FR=Frankreich, IT=Italien, ES=Spanien, NL=Niederlande, SE=Schweden${NC}"
-            echo -e "    ${CYAN}CA=Kanada, AU=Australien, JP=Japan, SG=Singapur, NO=Norwegen${NC}"
-            echo ""
-            
-            while true; do
-                read -p "$(echo -e "${CYAN}›${NC}   Ihr Heimatland (2-stelliger ISO-Code): ")" HOME_COUNTRY
-                HOME_COUNTRY=$(echo "$HOME_COUNTRY" | tr '[:lower:]' '[:upper:]')
-                
-                if [[ "$HOME_COUNTRY" =~ ^[A-Z]{2}$ ]]; then
-                    log_info "Manuell gesetztes Heimatland: $HOME_COUNTRY wird permanent geschützt"
-                    break
-                else
-                    echo -e "${RED}  Bitte einen gültigen 2-stelligen Ländercode eingeben (z.B. DE, US, FR)${NC}"
-                fi
-            done
-        fi
-        
-        # Blocking-Level auswählen
-        local country_options=(
-            "🎯 Standard-Schutz: China, Russland, Nordkorea, Iran (Top-Bedrohungsquellen)" 
-            "🛡️  Maximaler Schutz: + Belarus, Myanmar, Syrien, Afghanistan, Irak, Libyen" 
-            "⚡ Basis-Schutz: Nur China und Russland (minimaler Impact)"
-            "🔧 Expert-Modus: Eigene Länder-Liste definieren"
-        )
-        
-        prompt_for_choice "Welche Länder blockieren?" "GEOIP_PRESET" "1" "${country_options[@]}"
-        
-        case "$GEOIP_PRESET" in
-            1) 
-                BLOCKED_COUNTRIES="CN RU KP IR"
-                print_summary_tip "Standard-Blocking: China, Russland, Nordkorea, Iran"
-                print_summary_tip "Erwartete Angriffs-Reduktion: ~70%"
-                ;;
-            2) 
-                BLOCKED_COUNTRIES="CN RU KP IR BY MM SY AF IQ LY"
-                print_summary_tip "Maximal-Blocking: China, Russland, Nordkorea, Iran, Belarus, Myanmar, Syrien, Afghanistan, Irak, Libyen"
-                print_summary_tip "Erwartete Angriffs-Reduktion: ~85%"
-                ;;
-            3) 
-                BLOCKED_COUNTRIES="CN RU"
-                print_summary_tip "Basis-Blocking: China, Russland"
-                print_summary_tip "Erwartete Angriffs-Reduktion: ~60%"
-                ;;
-            4) 
-                echo -e "\n  ${BLUE}📋 Expert-Modus: Verfügbare Länder-Codes${NC}"
-                echo -e "    ${RED}Höchstes Risiko:${NC} CN=China, RU=Russland, KP=Nordkorea, IR=Iran"
-                echo -e "    ${YELLOW}Hohes Risiko:${NC} BY=Belarus, MM=Myanmar, SY=Syrien, AF=Afghanistan"
-                echo -e "    ${YELLOW}Mittleres Risiko:${NC} IQ=Irak, LY=Libyen, PK=Pakistan, BD=Bangladesch"
-                echo -e "    ${BLUE}💡 Vollständige Liste: https://www.geonames.org/countries/${NC}"
-                echo ""
-                
-                while true; do
-                    read -p "$(echo -e "${CYAN}›${NC}   Länder-Codes (Leerzeichen-getrennt, z.B. CN RU IR): ")" BLOCKED_COUNTRIES
-                    
-                    if [ -n "$BLOCKED_COUNTRIES" ]; then
-                        # Konvertiere zu Großbuchstaben
-                        BLOCKED_COUNTRIES=$(echo "$BLOCKED_COUNTRIES" | tr '[:lower:]' '[:upper:]')
-                        
-                        # NEU: Robuste Validierung statt einfacher Regex
-                        if is_valid_country_list "$BLOCKED_COUNTRIES"; then
-                            log "   🔧 Expert-Blocking konfiguriert: $BLOCKED_COUNTRIES"
-                            break
-                        else
-                            echo -e "${RED}  ❌ Ungültige Ländercodes gefunden!${NC}"
-                            echo -e "${RED}     Bitte nur gültige 2-stellige ISO-Codes verwenden.${NC}"
-                            echo -e "${RED}     Beispiele: DE US CN RU FR IT ES (getrennt durch Leerzeichen)${NC}"
-                            echo ""
-                            echo -e "${BLUE}  💡 Tipp: Codes müssen exakt 2 Zeichen haben und real existieren${NC}"
-                        fi
-                    else
-                        echo -e "${RED}  Bitte mindestens ein Land eingeben${NC}"
-                    fi
-                done
-                ;;
-        esac
-        
-        # Heimatland-Konflikt-Prüfung
-        if echo "$BLOCKED_COUNTRIES" | grep -wq "$HOME_COUNTRY"; then
-            echo -e "\n  ${YELLOW}⚠️  KONFLIKT ERKANNT: Ihr Heimatland ($HOME_COUNTRY) steht in der Blocklist!${NC}"
-            echo -e "  ${GREEN}✅ Wird automatisch entfernt - Sie können sich nicht aussperren${NC}"
-            
-            # Entferne Heimatland aus Blocklist
-            BLOCKED_COUNTRIES=$(echo "$BLOCKED_COUNTRIES" | sed "s/\b$HOME_COUNTRY\b//g" | tr -s ' ' | sed 's/^ *//; s/ *$//')
-            log_info "$HOME_COUNTRY automatisch aus Blocklist entfernt"
-            log_info "Finale Blocklist: $BLOCKED_COUNTRIES"
-        fi
-        
-        echo -e "\n  ${GREEN}✅ Geo-IP-Blocking erfolgreich konfiguriert${NC}"
-        echo -e "  ${CYAN}🏠 Geschütztes Heimatland: $HOME_COUNTRY (permanent sicher)${NC}"
-        echo -e "  ${RED}🚫 Blockierte Länder: $BLOCKED_COUNTRIES${NC}"
-        echo -e "  ${BLUE}🔄 IP-Listen werden täglich automatisch von ipdeny.com aktualisiert${NC}"
-        echo -e "  ${PURPLE}⚡ Nullwartungsaufwand - läuft vollautomatisch${NC}"
-    else
-        log_info "Geo-IP-Blocking übersprungen - Standard-Firewall wird verwendet"
-    fi
-
-    print_section_header "6" "Hauptzweck des Servers" "🎯"
-    local role_options=("Docker / Container Host" "Einfacher Dienst-Server (ohne Docker)")
-    prompt_for_choice "Welchen Zweck soll der Server erfüllen?" "SERVER_ROLE" "1" "${role_options[@]}"
-    
-    if [ "$SERVER_ROLE" = "1" ]; then
-        echo -e "\n  ${PURPLE}--- Docker-Konfiguration ---${NC}"
-        prompt_for_validated_input "  🐳 Docker IPv4-Netz (CIDR)" "DOCKER_IPV4_CIDR" "172.20.0.0/16" "is_valid_ipv4_cidr" "Ungültiges IPv4 CIDR-Format!"
-        prompt_for_validated_input "  🐳 Docker IPv6-Netz (CIDR)" "DOCKER_IPV6_CIDR" "fd00:dead:beef::/56" "is_valid_ipv6_cidr" "Ungültiges IPv6 CIDR-Format!"
-        prompt_for_yes_no "  🎛️  Portainer installieren?" "INSTALL_PORTAINER" "ja"
-        if [ "$INSTALL_PORTAINER" = "ja" ]; then NEEDS_PORTAINER_IP_PROMPT=true; fi
-        prompt_for_yes_no "  🔄 Watchtower installieren?" "INSTALL_WATCHTOWER" "ja"
-    fi
-
-    print_section_header "7" "Administration & Benachrichtigungen" "📧"
-    prompt_for_validated_input "E-Mail für System-Alerts" "NOTIFICATION_EMAIL" "$NOTIFICATION_EMAIL_DEFAULT" "is_valid_email" "Ungültige E-Mail-Adresse!"
-    prompt_for_yes_no "Sollen systemweite E-Mail-Benachrichtigungen eingerichtet werden?" "ENABLE_SYSTEM_MAIL" "ja"
-    
-    if [ "$ENABLE_SYSTEM_MAIL" = "ja" ]; then
-        echo -e "\n  ${PURPLE}--- SMTP-Konfiguration (via msmtp) ---${NC}"
-        local smtp_preset_options=("Standard STARTTLS (Port 587, empfohlen)" "Manuelle Konfiguration")
-        local smtp_preset
-        prompt_for_choice "Welche Art von SMTP-Verbindung?" "smtp_preset" "1" "${smtp_preset_options[@]}"
-
-        case "$smtp_preset" in
-            1)
-                SMTP_PORT="587"
-                SMTP_TLS_STARTTLS="ja"
-                ;;
-            2)
-                prompt_for_validated_input "  🔌 SMTP-Port" "SMTP_PORT" "587" "is_numeric" "Bitte eine Zahl eingeben."
-                prompt_for_yes_no "  🛡️ STARTTLS verwenden?" "SMTP_TLS_STARTTLS" "ja"
-                ;;
-        esac
-
-        prompt_for_validated_input "  📬 SMTP-Server (Host)" "SMTP_HOST" "" "is_valid_hostname" "Ungültiger Hostname!"
-        prompt_for_yes_no "  🔒 SMTP erfordert Authentifizierung?" "SMTP_AUTH" "ja"
-        if [ "$SMTP_AUTH" = "ja" ]; then
-            read -p "$(echo -e "${CYAN}›${NC}")   👤 SMTP-Benutzername: " SMTP_USER
-            prompt_for_password_with_confirmation "  🔑 SMTP-Passwort" "SMTP_PASSWORD"
-        fi
-        read -p "$(echo -e "${CYAN}›${NC}")   ✉️  Absender-Adresse (From): " SMTP_FROM
-        while ! is_valid_email "$SMTP_FROM"; do
-            echo -e "${RED}  Ungültige E-Mail-Adresse für den Absender.${NC}"
-            read -p "$(echo -e "${CYAN}›${NC}")   ✉️  Absender-Adresse (From): " SMTP_FROM
-        done
-    fi
-    
-    prompt_for_yes_no "Erweiterte Auto-Updates (auch für 'updates')?" "UPGRADE_EXTENDED" "nein"
-    
-    log_ok "Alle Konfigurationsdaten erfasst. Das Setup beginnt jetzt..."
-    
-    log_info "--- Finale Konfiguration für diesen Lauf ---"
-    log_info "  Heimatland (geschützt): ${HOME_COUNTRY:-'Nicht gesetzt'}"
-    log_info "  Blockierte Länder: ${BLOCKED_COUNTRIES:-'Keine'}"
-    log_info "  Locale: $LOCALE"
-    log_info "  Notifications: $NOTIFICATION_EMAIL"
-    log_info "-----------------------------------------"
-    
-    sleep 2
-}
-
 # ===============================================================================
 #                    AIDE & RKHUNTER JOURNALD-INTEGRATION
 # ===============================================================================
 
 ##
-# Konfiguriert AIDE (Integritäts-Checker) für die Ausführung via systemd-Timer
-# und leitet die Ausgabe direkt an das journald-Log um.
+# Konfiguriert AIDE durch Herunterladen des Templates und Erstellen der systemd-Units.
 ##
 configure_aide() {
-    log_info "Konfiguriere AIDE für Integritätsüberwachung..."
+    log_info "Konfiguriere AIDE (System-Integritäts-Monitoring)..."
     
-    # KRITISCH: Stelle sicher, dass das AIDE-Verzeichnis existiert
-    log_info "  -> Erstelle AIDE-Konfigurationsverzeichnis..."
-    mkdir -p /etc/aide
-    mkdir -p /var/lib/aide
-    mkdir -p /var/log/aide
-    
-    # Setze korrekte Berechtigungen
+    # --- Schritt 1: Deaktiviere Standard-Timer ---
+    systemctl disable --now dailyaidecheck.timer >/dev/null 2>&1 || true
+
+    # --- Schritt 2: Verzeichnisse erstellen ---
+    mkdir -p /etc/aide /var/lib/aide /var/log/aide
     chown root:root /etc/aide /var/lib/aide
-    chmod 755 /etc/aide /var/lib/aide
+    chmod 750 /etc/aide /var/lib/aide
     chown root:adm /var/log/aide
     chmod 750 /var/log/aide
-    
-    log_ok "AIDE-Verzeichnisse erfolgreich erstellt."
-    # 1. Community-bewährte AIDE Config erstellen
-    # (Dieser Teil bleibt unverändert)
-    backup_and_register "/etc/aide/aide.conf"
-    cat > /etc/aide/aide.conf << 'EOF'
-# AIDE Configuration - Community Best Practices
-# Based on production server experience and security recommendations
-
-# ═══════════════════════════════════════════════════════════════════════════
-# DATABASE CONFIGURATION
-# ═══════════════════════════════════════════════════════════════════════════
-database_in=file:/var/lib/aide/aide.db
-database_out=file:/var/lib/aide/aide.db.new
-database_new=file:/var/lib/aide/aide.db.new
-
-# ═══════════════════════════════════════════════════════════════════════════
-# LOGGING & OUTPUT (journald-optimized)
-# ═══════════════════════════════════════════════════════════════════════════
-log_level=info
-
-# Primary output: journald (structured logging)
-report_url=syslog:LOG_LOCAL0
-
-# Backup: Traditional logfile (fallback)
-report_url=file:/var/log/aide/aide.log
-
-# Gzip compression for file reports (space-efficient)
-gzip_dbout=yes
-
-# ═══════════════════════════════════════════════════════════════════════════
-# RULE DEFINITIONS (Security-focused)
-# ═══════════════════════════════════════════════════════════════════════════
-
-# Full monitoring (critical system files)
-Full = p+i+n+u+g+s+b+m+c+md5+sha1+sha256+rmd160
-
-# Monitor permissions and ownership only (large directories)
-Perms = p+i+u+g
-
-# Monitor content changes (config files)
-Content = p+i+n+u+g+s+b+m+c+md5+sha256
-
-# Monitor only metadata (logs, temp files)
-Metadata = p+i+n+u+g
-
-# Static files (never change after installation)
-Static = p+i+n+u+g+s+b+m+c+md5+sha1+sha256+rmd160
-
-# ═══════════════════════════════════════════════════════════════════════════
-# CRITICAL SYSTEM FILES (Full monitoring)
-# ═══════════════════════════════════════════════════════════════════════════
-
-# Boot and kernel
-/boot Full
-/lib/modules Full
-
-# System binaries (critical)
-/bin Full
-/sbin Full
-/usr/bin Full
-/usr/sbin Full
-/usr/local/bin Full
-/usr/local/sbin Full
-
-# Critical libraries
-/lib Full
-/usr/lib Full
-
-# ═══════════════════════════════════════════════════════════════════════════
-# CONFIGURATION FILES (Content monitoring)
-# ═══════════════════════════════════════════════════════════════════════════
-
-# System configuration
-/etc Content
-
-# SSH configuration (extra important)
-/etc/ssh Content
-
-# Network configuration
-/etc/network Content
-/etc/systemd/network Content
-
-# Security configurations
-/etc/security Content
-/etc/pam.d Content
-/etc/sudoers Content
-/etc/sudoers.d Content
-
-# ═══════════════════════════════════════════════════════════════════════════
-# USER DATA (Selective monitoring)
-# ═══════════════════════════════════════════════════════════════════════════
-
-# Root home (important)
-/root Content
-
-# User homes (metadata only - privacy vs security balance)
-/home Perms
-
-# ═══════════════════════════════════════════════════════════════════════════
-# SYSTEM DIRECTORIES (Metadata monitoring)
-# ═══════════════════════════════════════════════════════════════════════════
-
-# Important directories
-/opt Perms
-/srv Perms
-/usr/share Perms
-
-# Custom script directories (important for security)
-/opt/scripts Content
-
-# ═══════════════════════════════════════════════════════════════════════════
-# EXCLUSIONS (Reduce noise and improve performance)
-# ═══════════════════════════════════════════════════════════════════════════
-
-# Temporary and cache directories
-!/tmp
-!/var/tmp
-!/var/cache
-!/var/lib/apt/lists
-!/var/lib/dpkg/info
-
-# Logs (change constantly)
-!/var/log
-!/var/spool
-
-# Runtime directories
-!/run
-!/var/run
-!/sys
-!/proc
-!/dev
-
-# Docker (if present)
-!/var/lib/docker
-
-# Package manager
-!/var/lib/dpkg/lock
-!/var/lib/dpkg/lock-frontend
-!/var/cache/apt/archives
-
-# Mail
-!/var/mail
-!/var/spool/mail
-
-# User-specific excludes
-!/home/.*/\.cache
-!/home/.*/\.local/share/Trash
-!/home/.*/\.mozilla/firefox/.*/Cache
-!/home/.*/\.thumbnails
-
-# systemd
-!/var/lib/systemd/random-seed
-!/var/lib/systemd/catalog/database
-!/etc/machine-id
-
-# Network Manager
-!/etc/NetworkManager/system-connections
-
-# Certificate updates
-!/etc/ssl/certs/ca-certificates.crt
-
-# Time-based files
-!/etc/adjtime
-!/etc/localtime
-
-# ═══════════════════════════════════════════════════════════════════════════
-# SPECIAL CASES (Server-specific)
-# ═══════════════════════════════════════════════════════════════════════════
-
-# Web server (if present)
-/var/www Content
-
-# Database (metadata only - data changes frequently)
-/var/lib/mysql Perms
-/var/lib/postgresql Perms
-
-# Application configs
-/usr/local/etc Content
-
-# Backup directories
-/backup Perms
-/var/backups Perms
-EOF
-
-
-    # AIDE-spezifische journald-Konfiguration
-    mkdir -p /etc/systemd/journald.conf.d
-    cat > /etc/systemd/journald.conf.d/aide-logging.conf << 'EOF'
-# AIDE-optimierte journald-Konfiguration
-[Journal]
-# AIDE-Logs persistent speichern (wichtig für Forensik)
-Storage=persistent
-
-# Längere Aufbewahrung für Integrity-Logs
-MaxRetentionSec=12week
-
-# Komprimierung für große AIDE-Reports
-Compress=yes
-
-# Erhöhte Limits für AIDE-Reports (können groß werden)
-SystemMaxUse=300M
-SystemMaxFileSize=50M
-
-# Rate-Limiting für AIDE anpassen (Reports können viele Zeilen haben)
-RateLimitIntervalSec=60s
-RateLimitBurst=50000
-EOF
+   
+    # --- Schritt 3: Lade Konfigurations-Template herunter ---
+    download_and_process_template "aide.conf.template" "/etc/aide/aide.conf" "640" "root:root"
 
     # AIDE-spezifisches Log-Directory (nur als Backup)
     mkdir -p /var/log/aide
     chown root:adm /var/log/aide
     chmod 750 /var/log/aide
 
-    # 3. Systemd Service (jetzt korrigiert)
+    # 3. Systemd Service 
     cat > /etc/systemd/system/aide-check.service << 'EOF'
 [Unit]
 Description=AIDE File Integrity Check
@@ -2191,15 +1643,13 @@ EOF
    # 5. journald-Konfiguration neu laden und systemd-Units aktivieren
     run_with_spinner "Lade systemd-Konfiguration neu..." "systemctl restart systemd-journald && systemctl daemon-reload"
     
-    # KORRIGIERT: Timer aktivieren UND starten
-    if run_with_spinner "Aktiviere AIDE-Timer..." "systemctl enable --now aide-check.timer"; then
-        log_ok "AIDE-Timer erfolgreich aktiviert und gestartet."
-    else
-        log_warn "AIDE-Timer konnte nicht aktiviert werden."
-        # Nicht abbrechen - AIDE ist nicht kritisch
+    # --- Schritt 6: Aktiviere den neuen Timer (für zukünftige Starts) ---
+    systemctl daemon-reload
+    if ! run_with_spinner "Aktiviere AIDE-Timer für zukünftige Starts..." "systemctl enable aide-check.timer"; then
+        log_warn "AIDE-Timer konnte nicht für den Systemstart aktiviert werden."
     fi
     
-    log_ok "AIDE konfiguriert (täglicher Scan via systemd-timer)."
+    log_ok "AIDE-Konfiguration abgeschlossen und Timer für nächsten Boot vorgemerkt."
     log_info "  📜 Logs abrufen mit: journalctl -u aide-check.service"
     log_info "  📊 Timer-Status prüfen mit: systemctl list-timers aide-check.timer"
 }
@@ -2211,80 +1661,8 @@ EOF
 configure_rkhunter() {
     log_info "Konfiguriere RKHunter..."
     
-    # 1. Saubere, funktionsfähige Config basierend auf offizieller Doku
-    backup_and_register "/etc/rkhunter.conf"
-    cat > /etc/rkhunter.conf << 'EOF'
-# RKHunter Configuration - Based on official documentation
-# Compatible with Debian/Ubuntu package version
-
-# ═══════════════════════════════════════════════════════════════════════════
-# UPDATES & MIRRORS
-# ═══════════════════════════════════════════════════════════════════════════
-UPDATE_MIRRORS=1
-MIRRORS_MODE=0
-WEB_CMD=""
-
-# ═══════════════════════════════════════════════════════════════════════════
-# SYSTEM PATHS (Debian-Standards)
-# ═══════════════════════════════════════════════════════════════════════════
-INSTALLDIR=/usr
-SCRIPTDIR=/usr/share/rkhunter/scripts
-TMPDIR=/var/lib/rkhunter/tmp
-DBDIR=/var/lib/rkhunter/db
-BINDIR=/usr/bin
-
-# ═══════════════════════════════════════════════════════════════════════════
-# LOGGING (journald-kompatibel)
-# ═══════════════════════════════════════════════════════════════════════════
-LOGFILE=/var/log/rkhunter.log
-APPEND_LOG=1
-USE_SYSLOG=authpriv.notice
-COPY_LOG_ON_ERROR=0
-
-# ═══════════════════════════════════════════════════════════════════════════
-# SCAN CONFIGURATION
-# ═══════════════════════════════════════════════════════════════════════════
-
-# Rootkit scanning mode (empty = standard mode, THOROUGH = deep scan)
-# Official docs: "SHOULD NOT BE ENABLED BY DEFAULT"
-#SCANROOTKITMODE=THOROUGH
-
-# Package manager integration (Debian best practice)
-PKGMGR=DPKG
-
-# Hash function (standard für Debian/Ubuntu)
-HASH_CMD=sha256sum
-
-# ═══════════════════════════════════════════════════════════════════════════
-# SSH SECURITY
-# ═══════════════════════════════════════════════════════════════════════════
-ALLOW_SSH_ROOT_USER=no
-ALLOW_SSH_PROT_V1=2
-
-# ═══════════════════════════════════════════════════════════════════════════
-# WHITELISTS (Only essential ones)
-# ═══════════════════════════════════════════════════════════════════════════
-SCRIPTWHITELIST=/usr/bin/groups
-SCRIPTWHITELIST=/usr/bin/ldd
-SCRIPTWHITELIST=/usr/bin/which
-SCRIPTWHITELIST=/usr/bin/egrep
-SCRIPTWHITELIST=/usr/bin/fgrep
-
-ALLOWHIDDENDIR=/etc/.git
-ALLOWHIDDENFILE=/etc/.pwd.lock
-# VPS-specific: Allow DHCP client
-ALLOWPROCLISTEN=/sbin/dhclient
-
-# ═══════════════════════════════════════════════════════════════════════════
-# PERFORMANCE (VPS-friendly)  
-# ═══════════════════════════════════════════════════════════════════════════
-DISABLE_TESTS=suspscan
-
-# ═══════════════════════════════════════════════════════════════════════════
-# MAIL NOTIFICATIONS (added below if enabled)
-# ═══════════════════════════════════════════════════════════════════════════
-EOF
-
+    # --- Schritt 1: Lade Konfigurations-Template herunter ---
+    download_and_process_template "rkhunter.conf.template" "/etc/rkhunter.conf" "640" "root:root"
     
     # RKHunter-spezifische journald-Konfiguration
     mkdir -p /etc/systemd/journald.conf.d
@@ -3135,90 +2513,7 @@ EOF
     
     log_ok "Zentrale Log-Verwaltung via journald erfolgreich konfiguriert."
 }
-##
-# MODUL: Konfiguriert das Backup- und Wartungsmodul (system-backup).
-##
-module_services() {
-    local TEST_MODE="$1"
-    log_info "💾 MODUL: Services & Wartung (Backup)"
 
-    log_info "  -> Erstelle robustes Backup-Skript mit Journald-Integration..."
-    cat > /usr/local/bin/system-backup << 'EOF'
-#!/bin/bash
-# System-Backup-Skript v2.0 - mit Journald-Integration
-
-# Bei Fehlern sofort abbrechen
-set -e
-set -o pipefail
-
-BACKUP_DIR="/var/backups"
-DATE=$(date +%Y%m%d)
-BACKUP_FILE="$BACKUP_DIR/system-backup-$DATE.tar.gz"
-PACKAGELIST_FILE="$BACKUP_DIR/installed-packages-$DATE.txt"
-LOG_TAG="system-backup"
-
-# --- Vorbereitung ---
-logger -t "$LOG_TAG" "Starte System-Backup..."
-mkdir -p "$BACKUP_DIR"
-dpkg --get-selections > "$PACKAGELIST_FILE"
-logger -t "$LOG_TAG" "Liste der installierten Pakete in $PACKAGELIST_FILE gespeichert."
-
-# --- Haupt-Backup ---
-logger -t "$LOG_TAG" "Erstelle Haupt-Backup nach $BACKUP_FILE..."
-if tar -czf "$BACKUP_FILE" \
-    --exclude='/home/*/.cache' \
-    --exclude='/var/cache' \
-    --exclude='/var/log' \
-    --exclude='/var/tmp' \
-    /etc /home /root /opt /usr/local/bin /usr/local/sbin /var/www "$PACKAGELIST_FILE"; then
-    
-    logger -t "$LOG_TAG" -p "daemon.notice" "SUCCESS: Backup erfolgreich erstellt. Größe: $(du -sh "$BACKUP_FILE" | awk '{print $1}')"
-else
-    logger -t "$LOG_TAG" -p "daemon.err" "ERROR: Backup-Erstellung mit tar ist fehlgeschlagen!"
-    exit 1
-fi
-
-# --- Aufräumen ---
-logger -t "$LOG_TAG" "Suche nach Backups, die älter als 7 Tage sind..."
-# Zuerst zählen, dann löschen, für ein sauberes Log
-find "$BACKUP_DIR" -name "system-backup-*.tar.gz" -mtime +7 -print0 | xargs -0 -r rm -f
-local geloescht_count=$? # Zählt die gelöschten Dateien
-logger -t "$LOG_TAG" "$geloescht_count alte(s) Backup(s) entfernt."
-
-logger -t "$LOG_TAG" -p "daemon.notice" "Backup-Prozess erfolgreich abgeschlossen."
-EOF
-    chmod +x /usr/local/bin/system-backup
-
-    # --- systemd Timer für das Backup erstellen ---
-    log_info "  -> Erstelle systemd-Service und -Timer für das Backup..."
-    cat > /etc/systemd/system/system-backup.service << 'EOF'
-[Unit]
-Description=Run daily system backup script
-[Service]
-Type=oneshot
-ExecStart=/usr/local/bin/system-backup
-EOF
-
-    cat > /etc/systemd/system/system-backup.timer << 'EOF'
-[Unit]
-Description=Run system-backup.service daily at 3 AM
-[Timer]
-OnCalendar=*-*-* 03:00:00
-RandomizedDelaySec=1h
-Persistent=true
-[Install]
-WantedBy=timers.target
-EOF
-
-    if [ "$TEST_MODE" = true ]; then
-        log_warn "TEST-MODUS: Backup-Timer wird nicht aktiviert."
-    else
-        log_info "  -> Aktiviere den Backup-Timer..."
-        systemctl enable --now system-backup.timer
-    fi
-    
-    log_ok "Modul Services & Wartung erfolgreich abgeschlossen."
-}
 ##
 # MODUL: Überprüft den Status aller kritischen und wichtigen Services.
 ##
@@ -3913,139 +3208,47 @@ configure_geoip_system() {
     log_ok "GeoIP-Blocking (Set-basiert) erfolgreich installiert und aktiviert."
 }
 
-
 ##
-# Haupt-Einstiegspunkt des Skripts. Verarbeitet Argumente und startet das Setup.
+## Zeigt die Hilfe-Informationen für das Skript an.
 ##
-main() {
-    check_root
-
-    local TEST_MODE=false
-    # Stellt sicher, dass die globalen Variablen initialisiert sind
-    CONFIG_FILE=""
-    SCRIPT_VERBOSE=false
-    DEBUG=false
-    
-    while getopts ":c:thvd" opt; do
-        case ${opt} in
-            c) CONFIG_FILE=$OPTARG;;
-            t) TEST_MODE=true;;
-            h) show_usage; exit 0;;
-            v) SCRIPT_VERBOSE=true;;
-            d) DEBUG=true; SCRIPT_VERBOSE=true;;
-            \?) log_error "Ungültige Option: -$OPTARG"; show_usage; exit 1;;
-            :) log_error "Option -$OPTARG benötigt ein Argument."; show_usage; exit 1;;
-        esac
-    done
-
-    # Globale Flags für andere Funktionen und Kind-Prozesse verfügbar machen
-    export SCRIPT_VERBOSE DEBUG
-
-    # Fehlerfalle für das gesamte Skript einrichten
-    trap 'rollback' ERR
-
-    log_info "🚀 Starte Server-Baukasten v$SCRIPT_VERSION..."
-    
-    # Ausführungsmodus anzeigen
-    if [ "$DEBUG" = true ]; then
-        log_warn "DEBUG-MODUS ist aktiviert (maximale Ausgaben)."
-    elif [ "$SCRIPT_VERBOSE" = true ]; then
-        log_info "VERBOSE-MODUS ist aktiviert (detaillierte Ausgaben)."
-    fi
-    if [ "$TEST_MODE" = true ]; then
-        log_warn "TEST-MODUS ist aktiviert (überspringt langsame Operationen)."
-    fi
-    if [ -n "$CONFIG_FILE" ]; then
-        log_info "Verwende Konfigurationsdatei: $CONFIG_FILE"
-    fi
-
-    run_setup "$TEST_MODE"
-    
-    # Fehlerfalle nach erfolgreichem Setup deaktivieren
-    trap - ERR
-    # Sicherheits-Cleanup VOR der Zusammenfassung
-    cleanup_sensitive_data
-    
-    show_summary
-    
-    if [ "$TEST_MODE" = true ]; then
-        log_ok "Test-Setup erfolgreich abgeschlossen! ⚡"
-    else
-        log_ok "Server-Setup erfolgreich abgeschlossen! 🎉"
-    fi
-}
-
-# MEGA verbesserte show_usage() Funktion mit allen Features
 show_usage() {
     print_section_header "HELP" "SERVER-BAUKASTEN v$SCRIPT_VERSION" "🏗️"
-    echo -e "${BLUE}    Ein umfassendes Bash-Skript zur automatisierten Härtung und Konfiguration    ${NC}"
+    echo -e "${BLUE}    Ein umfassendes Bash-Skript zur automatisierten Härtung und Konfiguration   ${NC}"
     echo -e "${BLUE}         von neuen Debian 12 / Ubuntu 22.04+ Servern nach höchsten Standards.     ${NC}"
     echo ""
     
     # Verwendung
     print_summary_header "VERWENDUNG" "GREEN"
-    print_summary_entry "Interaktiver Modus" "sudo ./init_server.sh"
-    print_summary_entry "Automatischer Modus" "sudo ./init_server.sh -c config.conf"
-    print_summary_entry "Schneller Testlauf" "sudo ./init_server.sh -t"
+    print_summary_entry "Standard-Ausführung" "sudo ./serverbaukasten.sh -c config.conf"
+    print_summary_entry "Schneller Testlauf" "sudo ./serverbaukasten.sh -t -c config.conf"
     
     # Optionen
-    print_summary_header "OPTIONEN" "GREEN"
-    print_summary_entry "-c FILE" "Verwende Konfigurationsdatei statt interaktiver Abfragen."
-    print_summary_entry "-t" "Test-Modus (überspringt zeitaufwändige Operationen)."
-    print_summary_entry "-v" "Verbose-Modus (detaillierte Ausgaben und Fortschritt)."  # NEU
-    print_summary_entry "-d" "Debug-Modus (maximale Ausgaben + Entwickler-Traces)."   # NEU
-    print_summary_entry "-h" "Zeige diese Hilfe und beende das Skript."
-    # Was wird installiert & konfiguriert
-    print_summary_header "HAUPT-FEATURES (WAS WIRD INSTALLIERT & KONFIGURIERT)" "GREEN"
-    print_summary_entry "Firewall & IPS" "NFTables (Default-Drop) & CrowdSec (Kollaborativ)"
-    print_summary_entry "GeoIP-Blocking" "Intelligente Länder-basierte Bedrohungsabwehr" # NEU
-    print_summary_entry "Heimatland-Schutz" "Automatisch aus Locale erkannt, nie blockiert" # NEU
-    print_summary_entry "System-Integrität" "AIDE (Datei-Überwachung) & RKHunter (Rootkit-Scan)"
-    print_summary_entry "Kernel-Härtung" "Schutz vor DDoS-Ansätzen & System-Optimierungen"
-    print_summary_entry "Updates & Backups" "Automatische Sicherheits-Updates & tägliche Backups"
-    print_summary_entry "Container (Optional)" "Docker, Portainer, Watchtower"
-    print_summary_entry "VPN-Zugang (Optional)" "Tailscale für sicheren, unsichtbaren Zugang"
-    
-    #E-Mail-Benachrichtigungen
-    print_summary_header "E-MAIL-BENACHRICHTIGUNGEN (FALLS AKTIVIERT)" "GREEN"
-    print_summary_tip "Das Skript konfiguriert ein zentrales Mail-System (msmtp)."
-    print_summary_tip "Du wirst über folgende kritische Ereignisse informiert:"
-    echo -e "      ${CYAN}• Tägliche CrowdSec-Reports (nur wenn Angriffe stattfanden)${NC}"
-    echo -e "      ${CYAN}• Warnungen von RKHunter (Rootkit-Funde)${NC}"
-    echo -e "      ${CYAN}• Warnungen von AIDE (Datei-Veränderungen)${NC}"
-    echo -e "      ${CYAN}• Fehler bei System-Diensten (via systemd)${NC}"
-    echo -e "      ${CYAN}• Tägliche Erfolgs-Reports vom System-Backup${NC}"
-    echo -e "      ${CYAN}• Benachrichtigungen über automatische System-Updates${NC}"
-    
-    # Wichtige Hinweise
-    print_summary_header "WICHTIGE HINWEISE" "YELLOW"
-    print_summary_warning "Dieses Skript muss als root ausgeführt werden (sudo)."
-    print_summary_warning "Unterstützt Debian 12 (Bookworm) und Ubuntu 22.04+ LTS."
-    print_summary_warning "Backup wichtiger Daten vor der Ausführung empfohlen."
-    print_summary_warning "Existierende Firewall-Regeln werden überschrieben."
+    print_summary_header "OPTIONEN" "CYAN"
+    print_summary_entry "-c FILE" "Pfad zur Konfigurationsdatei (Pflicht)."
+    print_summary_entry "-t" "Test-Modus (überspringt langsame Operationen)."
+    print_summary_entry "-v" "Verbose-Modus (detaillierte Ausgaben)."
+    print_summary_entry "-d" "Debug-Modus (maximale Ausgaben)."
+    print_summary_entry "-h" "Zeigt diese Hilfe an."
 
-    # Logs & Support
-    print_summary_header "LOGS & SUPPORT" "GREEN"
-    print_summary_entry "Setup-Log" "$LOG_FILE"
-    print_summary_entry "GeoIP-Updates" "journalctl -u geoip-update.service"
-    print_summary_entry "CrowdSec-Alerts" "journalctl -u crowdsec"
-    print_summary_entry "Mail-Versand" "journalctl | grep msmtp"
+    # Haupt-Features
+    print_summary_header "HAUPT-FEATURES" "PURPLE"
+    print_summary_entry "Sicherheits-Basis" "NFTables, CrowdSec, AIDE, RKHunter, Kernel-Härtung"
+    print_summary_entry "Unsichtbarer Zugang" "Vollständige Integration von Tailscale VPN"
+    print_summary_entry "Automatisierung" "Updates & Wartung via moderner systemd-Timer"
+    print_summary_entry "Container-Ready" "Gehärtete Docker-Installation (optional)"
     
-     # Nach dem Setup
-    print_summary_header "WICHTIGE SCHRITTE NACH DEM SETUP" "YELLOW"
-    echo -e "    ${PURPLE}1.${NC} SSH-Verbindung testen und Server neustarten ('sudo reboot')."
-    echo -e "    ${PURPLE}2.${NC} SSH-Härtung: Falls kein Public Key im Setup angegeben wurde, unbedingt"
-    echo -e "       den Passwort-Login deaktivieren ('PasswordAuthentication no')."
-    echo -e "    ${PURPLE}3.${NC} Root-Konto sperren: Nach erfolgreichem Test des Admin-Users mit 'sudo'"
-    echo -e "       das root-Passwort sperren mit 'sudo passwd -l root'."
-    echo -e "    ${PURPLE}4.${NC} System prüfen: Firewall (`sudo nft list ruleset`) und Timer"
-    echo -e "       (`systemctl list-timers`) kontrollieren."
+    # Wichtigste Schritte nach dem Setup
+    print_summary_header "WICHTIGSTE SCHRITTE NACH DEM SETUP" "YELLOW"
+    echo -e "  ${PURPLE}1.${NC} SSH-Zugang in einem **neuen Terminal** testen."
+    echo -e "  ${PURPLE}2.${NC} Passwort-Login deaktivieren (falls SSH-Key genutzt)."
+    echo -e "  ${PURPLE}3.${NC} Root-Konto sperren: ${CYAN}sudo passwd -l root${NC}"
+    echo -e "  ${PURPLE}4.${NC} Server neustarten: ${CYAN}sudo reboot${NC}"
+    echo -e "  ${PURPLE}5.${NC} GeoIP-Listen laden: ${CYAN}sudo geoip-manager update${NC}"
     
     # Footer
     echo ""
     echo -e "${BLUE}═══════════════════════════════════════════════════════════════════════════════${NC}"
-    echo -e "${BLUE}   🤖 Sicherer und moderne Linux-Server.                                      ${NC}"
-    echo -e "${BLUE}   🌐 https://github.com/TZERO78/SERVERBAUKASTEN                              ${NC}"
+    echo -e "${BLUE}   🌐 Vollständige Doku: https://github.com/TZERO78/Server-Baukasten            ${NC}"
     echo -e "${BLUE}═══════════════════════════════════════════════════════════════════════════════${NC}"
 }
 main "$@"
