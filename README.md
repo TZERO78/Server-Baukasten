@@ -8,6 +8,12 @@ Ein einfaches Bash-Script, das einen frischen Debian/Ubuntu-Server in ~20 Minute
 
 **Ziel:** Nicht Enterprise-Hardening, sondern ein praktischer Starter für Home- und VPS-User, um Angriffsfläche schnell zu minimieren.
 
+
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Bash Shell](https://img.shields.io/badge/Shell-Bash-green.svg)](https://www.gnu.org/software/bash/)
+[![Debian](https://img.shields.io/badge/OS-Debian%2012-red.svg)](https://www.debian.org/)
+[![Ubuntu](https://img.shields.io/badge/OS-Ubuntu%2022.04+-orange.svg)](https://ubuntu.com/)
+
 ### ❗ Wichtiger Sicherheitshinweis: Docker vs. Podman
 
 Aktuell nutzt der Server-Baukasten in der Standard-Konfiguration (`SERVER_ROLE="1"`) **Docker**. Es ist ein bekanntes Problem, dass Docker standardmäßig versucht, die Firewall selbst zu verwalten. Dies kann in manchen Fällen die sorgfältig konfigurierten `nftables`-Regeln des Baukastens umgehen und unbeabsichtigt Ports öffnen.
@@ -27,11 +33,6 @@ Setze in deiner `mein-server.conf`-Datei den `SERVER_ROLE` auf "Einfacher Server
 SERVER_ROLE="2"
 ```
 
-
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Bash Shell](https://img.shields.io/badge/Shell-Bash-green.svg)](https://www.gnu.org/software/bash/)
-[![Debian](https://img.shields.io/badge/OS-Debian%2012-red.svg)](https://www.debian.org/)
-[![Ubuntu](https://img.shields.io/badge/OS-Ubuntu%2022.04+-orange.svg)](https://ubuntu.com/)
 
 ## Warum Bash statt Ansible/Puppet?
 
