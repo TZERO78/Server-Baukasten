@@ -25,7 +25,7 @@ Setze in deiner `mein-server.conf`-Datei den `SERVER_ROLE` auf "Einfacher Server
 ```bash
 # Server-Typ
 SERVER_ROLE="2"
-
+```
 
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
