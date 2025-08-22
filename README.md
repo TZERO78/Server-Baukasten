@@ -1,10 +1,10 @@
 # 🏗️ Server-Baukasten v3.0
 
-**Vollautomatische Linux-Server-Härtung mit modularer Multi-Layer-Security-Architektur**
+**Pragmatisches Starter-Hardening für Home-Server & kleine VPS**
 
-> 🚀 **Ein Framework, um einen neuen Linux-Server in 20 Minuten in eine sichere, produktionsreife Basis zu verwandeln.**
+> 🚀 **In ~20 Minuten wird ein frischer Debian/Ubuntu-Server mit einer soliden Sicherheits-Basis ausgestattet.**
 >
-> Die Kernphilosophie ist ein **von außen unsichtbarer Server**, der ausschließlich über ein sicheres VPN (Tailscale) erreichbar ist. Dadurch wird die Angriffsfläche gegen Null reduziert.
+> Kernidee: VPN-only (Tailscale) oder gehärteter Public-Mode → alle nicht benötigten Ports werden per Drop-Policy blockiert. Ziel ist nicht „Enterprise-Hardening", sondern ein praktischer Starter für Home- und VPS-User, um Angriffsfläche schnell zu minimieren.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Bash Shell](https://img.shields.io/badge/Shell-Bash-green.svg)](https://www.gnu.org/software/bash/)
@@ -15,19 +15,21 @@
 
 ## 🎯 Philosophie & Konzept
 
-Der Server-Baukasten ist ein pragmatisches Werkzeug, das auf drei Kernprinzipien basiert:
+Der Server-Baukasten ist ein pragmatisches Starter-Tool, das auf drei Kernprinzipien basiert:
 
-1. **Defense in Depth (Mehrschichtige Sicherheit):** Das System implementiert mehrere unabhängige Sicherheitsschichten - NFTables-Firewall, CrowdSec IPS, GeoIP-Blocking, AppArmor und Kernel-Härtung. Selbst wenn eine Schicht umgangen wird, greifen die anderen.
+1. **Solides Sicherheitsfundament:** Das Skript legt mehrere Basisschutz-Schichten an - NFTables-Firewall, CrowdSec IPS, GeoIP-Blocking und Kernel-Härtung. Es ist **kein vollständiges Enterprise-System**, sondern bietet dir eine sichere Ausgangsbasis, auf der du aufbauen kannst.
 
-2. **Moderne & einfache Werkzeuge:** Wir ersetzen konsequent Legacy-Tools durch ihre modernen Nachfolger (`nftables`, `systemd`, `CrowdSec`). Gleichzeitig wurde als Basis bewusst ein **einfaches Bash-Skript** gewählt – anstelle von komplexen Konfigurations-Management-Systemen wie Ansible oder Puppet. Das macht das System extrem transparent, portabel und ohne zusätzliche Abhängigkeiten auf jedem Standard-Server sofort lauffähig.
+2. **Einfachheit vor Komplexität:** Bewusst als **simples Bash-Skript** entwickelt – kein Ansible, kein Puppet, keine komplexen Dependencies. Läuft auf jedem Standard-Server sofort und ist komplett transparent nachvollziehbar. Du behältst die Kontrolle und verstehst, was passiert.
 
-3. **Infrastructure as Code (IaC):** Dein Server wird durch eine Konfigurationsdatei definiert. Anstatt Backups des Betriebssystems zu erstellen, kannst du mit dem Baukasten jederzeit einen identischen, sicheren Server aus dem Nichts neu erschaffen.
+3. **Reproduzierbares Setup:** Dein Server wird durch eine Konfigurationsdatei definiert. Du kannst jederzeit einen identischen, gehärteten Server neu aufsetzen – perfekt für Experimente oder Disaster Recovery.
+
+**Was es NICHT ist:** Eine vollautomatische Enterprise-Lösung oder ein Ansible-Ersatz. Es schafft nur das **sichere Fundament** – für deine spezifischen Services musst du selbst Hand anlegen.
 
 ### Zwei Sicherheitsmodelle
 
 **Modell 1: Maximale Sicherheit (VPN-Only)**
-- Server ist über Tailscale VPN erreichbar
-- Von außen völlig unsichtbar - keine offenen Ports
+- Server ist nur über Tailscale VPN erreichbar
+- Alle öffentlichen Ports geschlossen - kein direkter Internet-Zugang
 - Ideal für private Server und Entwicklungsumgebungen
 
 **Modell 2: Öffentlich zugänglich (Gehärtet)**
@@ -57,10 +59,10 @@ Du musst nur das Hauptskript und die Konfigurationsdatei herunterladen - der Res
    - "Settings" → "Keys" → "Generate auth key"
    - Key kopieren für die Konfigurationsdatei
 3. **Warum Tailscale?** 
-   - Macht deinen Server unsichtbar im Internet
+   - Reduziert die Angriffsfläche drastisch
    - Verschlüsselter, sicherer Zugang ohne offene Ports
    - Funktioniert auch hinter NAT/Firewall
-   - **Verhindert Angriffe präventiv** - was nicht sichtbar ist, kann nicht angegriffen werden
+   - **Verhindert viele Angriffe präventiv** - was nicht erreichbar ist, kann schwerer angegriffen werden
 
 ### System-Voraussetzungen
 
