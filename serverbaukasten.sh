@@ -27,7 +27,7 @@
 set -e
 set -o pipefail
 
-readonly SCRIPT_VERSION="3.0"
+readonly SCRIPT_VERSION="3.1"
 readonly CROWDSEC_MAXRETRY_DEFAULT=5
 readonly CROWDSEC_BANTIME_DEFAULT="48h" 
 readonly SSH_PORT_DEFAULT=22
