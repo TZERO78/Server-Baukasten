@@ -1,4 +1,4 @@
-# Server-Baukasten v3.0
+# Server-Baukasten v3.1
 
 **Pragmatisches Starter-Hardening für Home-Server & kleine VPS**
 
