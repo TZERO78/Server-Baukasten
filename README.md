@@ -8,6 +8,26 @@ Ein einfaches Bash-Script, das einen frischen Debian/Ubuntu-Server in ~20 Minute
 
 **Ziel:** Nicht Enterprise-Hardening, sondern ein praktischer Starter für Home- und VPS-User, um Angriffsfläche schnell zu minimieren.
 
+### ❗ Wichtiger Sicherheitshinweis: Docker vs. Podman
+
+Aktuell nutzt der Server-Baukasten in der Standard-Konfiguration (`SERVER_ROLE="1"`) **Docker**. Es ist ein bekanntes Problem, dass Docker standardmäßig versucht, die Firewall selbst zu verwalten. Dies kann in manchen Fällen die sorgfältig konfigurierten `nftables`-Regeln des Baukastens umgehen und unbeabsichtigt Ports öffnen.
+
+**Meine Roadmap zur Lösung:**
+Die nächste große Version des Server-Baukastens wird auf **Podman** umgestellt, eine moderne und sicherere Alternative, die sich perfekt in die System-Firewall integriert.
+
+---
+### **Empfohlene & sichere Methode für Container (Workaround)**
+
+Bis zur Umstellung auf Podman empfehle ich für maximale Sicherheit folgenden Weg:
+
+**Schritt 1: Konfiguration anpassen**
+Setze in deiner `mein-server.conf`-Datei den `SERVER_ROLE` auf "Einfacher Server", um die Docker-Installation des Baukastens zu überspringen:
+```bash
+# Server-Typ
+SERVER_ROLE="2"
+
+
+
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Bash Shell](https://img.shields.io/badge/Shell-Bash-green.svg)](https://www.gnu.org/software/bash/)
 [![Debian](https://img.shields.io/badge/OS-Debian%2012-red.svg)](https://www.debian.org/)
