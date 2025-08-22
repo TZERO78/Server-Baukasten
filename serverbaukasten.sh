@@ -1137,59 +1137,84 @@ GEOIP_SETS
 generate_geoip_jump_section() {
     if [ "${ENABLE_GEOIP_BLOCKING:-nein}" = "ja" ]; then
         cat << 'EOF'
-jump geoip_check comment "GeoIP-Filter"
+        jump geoip_check comment "GeoIP-Filter"
 EOF
     fi
 }
 
-
+##
+# KORRIGIERT: Docker-Input nur bei SERVER_ROLE="1"
+##
 generate_docker_input_section() {
-    if [ "$DOCKER_ACTIVE" = "true" ] && [ "$DOCKER_INTERFACE_EXISTS" = "true" ]; then
+    if [ "$SERVER_ROLE" = "1" ] && [ "$DOCKER_ACTIVE" = "true" ] && [ "$DOCKER_INTERFACE_EXISTS" = "true" ]; then
         cat << 'EOF'
-ip saddr $docker_networks_v4 accept comment "Docker-Container IPv4"
-ip6 saddr $docker_networks_v6 accept comment "Docker-Container IPv6"
-iifname "docker0" accept comment "Docker-Bridge-Interface"
+        ip saddr $docker_networks_v4 accept comment "Docker-Container IPv4"
+        ip6 saddr $docker_networks_v6 accept comment "Docker-Container IPv6"
+        iifname "docker0" accept comment "Docker-Bridge-Interface"
 EOF
     fi
 }
 
+##
+# KORRIGIERT: Tailscale-Input mit korrekter Einrückung
+##
 generate_tailscale_input_section() {
     if [ "$TAILSCALE_ACTIVE" = "true" ] && [ -n "$TAILSCALE_INTERFACE" ]; then
         cat << EOF
-iifname "$TAILSCALE_INTERFACE" accept comment "Allow-Input-from-Tailscale-Interface"
+        iifname "$TAILSCALE_INTERFACE" accept comment "Allow-Input-from-Tailscale-Interface"
 EOF
     fi
 }
 
+##
+# KORRIGIERT: Docker-Forward nur bei SERVER_ROLE="1"
+##
 generate_docker_forward_section() {
-    if [ "$DOCKER_ACTIVE" = "true" ] && [ "$DOCKER_INTERFACE_EXISTS" = "true" ]; then
+    if [ "$SERVER_ROLE" = "1" ] && [ "$DOCKER_ACTIVE" = "true" ] && [ "$DOCKER_INTERFACE_EXISTS" = "true" ]; then
         cat << 'EOF'
-# Docker-Container Forwarding
-iifname "docker0" oifname != "docker0" accept comment "Docker-to-External"
-iifname != "docker0" oifname "docker0" ct state related,established accept comment "External-to-Docker-Reply"
+        # Docker-Container Forwarding
+        iifname "docker0" oifname != "docker0" accept comment "Docker-to-External"
+        iifname != "docker0" oifname "docker0" ct state related,established accept comment "External-to-Docker-Reply"
 EOF
     fi
 }
 
-
-
+##
+# KORRIGIERT: Tailscale-Forward für beide Server-Rollen mit intelligenter Docker-Erkennung
+##
 generate_tailscale_forward_section() {
     if [ "$TAILSCALE_ACTIVE" = "true" ] && [ -n "$TAILSCALE_INTERFACE" ]; then
+        # Für SERVER_ROLE="1": Tailscale ↔ Docker Forwarding (nur wenn Docker aktiv)
+        if [ "$SERVER_ROLE" = "1" ] && [ "$DOCKER_ACTIVE" = "true" ] && [ "$DOCKER_INTERFACE_EXISTS" = "true" ]; then
+            cat << EOF
+        iifname "$TAILSCALE_INTERFACE" oifname "docker0" accept comment "Allow-Forward-Tailscale-to-Docker"
+        iifname "docker0" oifname "$TAILSCALE_INTERFACE" accept comment "Allow-Forward-Docker-to-Tailscale"
+EOF
+        fi
+        
+        # Für beide Rollen: Allgemeine Tailscale-Forwarding-Regeln (Subnet-Routing etc.)
         cat << EOF
-iifname "$TAILSCALE_INTERFACE" oifname "docker0" accept comment "Allow-Forward-Tailscale-to-Docker"
-iifname "docker0" oifname "$TAILSCALE_INTERFACE" accept comment "Allow-Forward-Docker-to-Tailscale"
+        # Tailscale VPN Forwarding
+        iifname "$TAILSCALE_INTERFACE" oifname != "$TAILSCALE_INTERFACE" accept comment "Tailscale-to-External"
+        iifname != "$TAILSCALE_INTERFACE" oifname "$TAILSCALE_INTERFACE" ct state related,established accept comment "External-to-Tailscale-Reply"
 EOF
     fi
 }
 
+##
+# KORRIGIERT: Docker-NAT nur bei SERVER_ROLE="1" - RICHTIGE EINRÜCKUNG
+##
 generate_docker_nat_section() {
-    if [ "$DOCKER_ACTIVE" = "true" ] && [ "$DOCKER_INTERFACE_EXISTS" = "true" ]; then
+    if [ "$SERVER_ROLE" = "1" ] && [ "$DOCKER_ACTIVE" = "true" ] && [ "$DOCKER_INTERFACE_EXISTS" = "true" ]; then
         cat << EOF
         oifname "$PRIMARY_INTERFACE" iifname "docker0" masquerade comment "Docker-IPv4-NAT"
 EOF
     fi
 }
 
+##
+# Tailscale-NAT für beide Server-Rollen (für Subnet-Routing/Exit-Node) - RICHTIGE EINRÜCKUNG
+##
 generate_tailscale_nat_section() {
     if [ "$TAILSCALE_ACTIVE" = "true" ] && [ -n "$TAILSCALE_INTERFACE" ]; then
         cat << EOF
@@ -1198,9 +1223,8 @@ EOF
     fi
 }
 
-
 ##
-# Erstellt die komplette /etc/nftables.conf Datei mit modularen Template-Funktionen.
+# KORRIGIERT: Erstellt die komplette /etc/nftables.conf Datei mit modularen Template-Funktionen.
 ##
 generate_nftables_config() {
     log_info "🔥 Generiere NFTables-Konfiguration..."
@@ -1212,15 +1236,21 @@ generate_nftables_config() {
     local private_nets_v4="10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 127.0.0.0/8"
     local private_nets_v6="::1/128, fc00::/7, fe80::/10"
     
-    # Docker-Netze SEPARAT definieren
+    # Docker-Netze SEPARAT definieren - KORRIGIERT: Nur wenn SERVER_ROLE="1" UND Variablen gesetzt
     local docker_nets_v4=""
     local docker_nets_v6=""
-    if [ "$SERVER_ROLE" = "1" ]; then
+    local has_docker_config=false
+    
+    if [ "$SERVER_ROLE" = "1" ] && [ -n "${DOCKER_IPV4_CIDR:-}" ] && [ -n "${DOCKER_IPV6_CIDR:-}" ]; then
         docker_nets_v4="$DOCKER_IPV4_CIDR"
         docker_nets_v6="$DOCKER_IPV6_CIDR"
+        has_docker_config=true
+        log_info "  -> Docker-Konfiguration erkannt: $docker_nets_v4, $docker_nets_v6"
+    else
+        log_info "  -> Keine Docker-Konfiguration (SERVER_ROLE=$SERVER_ROLE)"
     fi
 
-    # NFTables-Config mit separaten Definitionen
+    # NFTables-Config Basis
     cat > /etc/nftables.conf <<EOF
 #!/usr/sbin/nft -f
 # =============================================================================
@@ -1228,6 +1258,7 @@ generate_nftables_config() {
 # =============================================================================
 # Generiert am: $(date)
 # System: $(hostname) - $(uname -r)
+# Server-Rolle: ${SERVER_ROLE} (1=Docker, 2=Einfach)
 #
 # Diese Firewall implementiert eine mehrstufige Sicherheitsarchitektur:
 # 1. Connection Tracking (established/related zuerst)
@@ -1240,8 +1271,18 @@ generate_nftables_config() {
 # Netzwerk-Definitionen (dynamisch basierend auf Server-Konfiguration)
 define private_networks_v4 = { ${private_nets_v4} }
 define private_networks_v6 = { ${private_nets_v6} }
+EOF
+
+    # KORRIGIERT: Docker-Definitionen nur wenn tatsächlich benötigt
+    if [ "$has_docker_config" = "true" ]; then
+        cat >> /etc/nftables.conf <<EOF
 define docker_networks_v4 = { ${docker_nets_v4} }
 define docker_networks_v6 = { ${docker_nets_v6} }
+EOF
+    fi
+
+    # Hauptteil der Konfiguration
+    cat >> /etc/nftables.conf <<EOF
 
 # =============================================================================
 # HAUPTFILTER-TABELLE (inet = IPv4 + IPv6 kombiniert)
@@ -1265,11 +1306,10 @@ $(generate_geoip_sets_section)
         iifname "lo" accept comment "Loopback-Interface"
         ip saddr \$private_networks_v4 accept comment "Private IPv4-Netze"
         ip6 saddr \$private_networks_v6 accept comment "Private IPv6-Netze"
-        $(generate_docker_input_section)
-        $(generate_tailscale_input_section)
+$(generate_docker_input_section)$(generate_tailscale_input_section)
 
         # STUFE 4: Geografische Filterung - Länder-basierte Bedrohungsabwehr
-        $(generate_geoip_jump_section)
+$(generate_geoip_jump_section)
 
         # STUFE 5: Öffentliche Dienste - Explizit freigegebene Services
         tcp dport ${SSH_PORT} accept comment "SSH-Zugang"
@@ -1288,8 +1328,7 @@ $(generate_geoip_sets_section)
         ct state invalid drop comment "Korrupte Pakete"
         
         # Container- und VPN-spezifische Forward-Regeln
-        $(generate_docker_forward_section)
-        $(generate_tailscale_forward_section)
+$(generate_docker_forward_section)$(generate_tailscale_forward_section)
     }
 
     # -------------------------------------------------------------------------
@@ -1300,25 +1339,46 @@ $(generate_geoip_sets_section)
         # Ausgehender Traffic wird standardmäßig erlaubt
         # Bei Bedarf können hier restriktive Regeln ergänzt werden
       }
-    }
-    # =============================================================================
-    # NAT-TABELLEN: Network Address Translation für Container und VPN
-    # =============================================================================
-    table ip nat {
-        chain postrouting {
-            type nat hook postrouting priority srcnat; policy accept;
-    $(generate_docker_nat_section)
-    $(generate_tailscale_nat_section)
-        }
-    }
-    table ip6 nat {
-        chain postrouting {
-            type nat hook postrouting priority srcnat; policy accept;
-    $(generate_docker_nat_section | sed 's/IPv4/IPv6/')
-    $(generate_tailscale_nat_section | sed 's/IPv4/IPv6/')
-        }
-    }
+}
 EOF
+
+    # KORRIGIERT: NAT-Tabellen nur bei tatsächlichem Bedarf
+    local needs_nat=false
+    
+    # Docker benötigt NAT nur bei SERVER_ROLE="1"
+    if [ "$has_docker_config" = "true" ] && [ "$DOCKER_ACTIVE" = "true" ] && [ "$DOCKER_INTERFACE_EXISTS" = "true" ]; then
+        needs_nat=true
+        log_info "  -> NAT wird für Docker benötigt (SERVER_ROLE=1)"
+    fi
+    
+    # Tailscale kann NAT bei beiden Server-Rollen benötigen (für Subnet-Routing)
+    if [ "$TAILSCALE_ACTIVE" = "true" ] && [ -n "$TAILSCALE_INTERFACE" ]; then
+        needs_nat=true
+        log_info "  -> NAT wird für Tailscale benötigt (VPN-Routing)"
+    fi
+    
+    if [ "$needs_nat" = "true" ]; then
+        cat >> /etc/nftables.conf <<EOF
+# =============================================================================
+# NAT-TABELLEN: Network Address Translation für Container und VPN
+# =============================================================================
+table ip nat {
+    chain postrouting {
+        type nat hook postrouting priority srcnat; policy accept;
+$(generate_docker_nat_section)$(generate_tailscale_nat_section)
+    }
+}
+table ip6 nat {
+    chain postrouting {
+        type nat hook postrouting priority srcnat; policy accept;
+$(generate_docker_nat_section | sed 's/IPv4/IPv6/')$(generate_tailscale_nat_section | sed 's/IPv4/IPv6/')
+    }
+}
+EOF
+        log_info "  -> NAT-Tabellen hinzugefügt"
+    else
+        log_info "  -> Keine NAT-Tabellen benötigt"
+    fi
 
     log_ok "NFTables-Konfiguration erfolgreich generiert."
     
@@ -1817,15 +1877,16 @@ module_cleanup() {
     log_info "  -> 1/7: Setze aktive Systemzustände zurück..."
     if command -v nft &>/dev/null; then nft flush ruleset; fi
     if command -v docker &>/dev/null; then
-        docker stop portainer watchtower >/dev/null 2>&1
-        docker rm -f portainer watchtower >/dev/null 2>&1
-        docker system prune -af --volumes >/dev/null 2>&1
+        # Vollständige Docker-Bereinigung
+        docker stop $(docker ps -aq) >/dev/null 2>&1 || true
+        docker rm $(docker ps -aq) >/dev/null 2>&1 || true
+        systemctl stop docker docker.socket containerd >/dev/null 2>&1 || true
+        systemctl disable docker docker.socket containerd >/dev/null 2>&1 || true
     fi
     log_ok "Aktive Firewall-Regeln und Docker-Objekte entfernt."
 
     # --- 2. Alle relevanten systemd-Units stoppen & deaktivieren ---
     log_info "  -> 2/7: Stoppe und deaktiviere alle Baukasten-Timer und -Services..."
-    # (Keine Änderung hier, die Liste war bereits gut)
     local units_to_remove=(
         "aide-check.timer" "aide-check.service" "dailyaidecheck.timer" "dailyaidecheck.service"
         "rkhunter-check.timer" "rkhunter-check.service" "geoip-update.timer" "geoip-update.service"
@@ -1836,15 +1897,17 @@ module_cleanup() {
     systemctl disable "${units_to_remove[@]}" >/dev/null 2>&1
     log_ok "Alle systemd-Units gestoppt und deaktiviert."
     
-    # --- 3. Pakete deinstallieren (inkl. Docker) ---
+    # --- 3. Pakete deinstallieren (ALLES entfernen - unabhängig von Zielkonfiguration) ---
     log_info "  -> 3/7: Deinstalliere alle vom Baukasten installierten Pakete..."
     local packages_to_purge=(
         "aide" "rkhunter" "crowdsec" "crowdsec-firewall-bouncer-nftables" "msmtp" "msmtp-mta"
         "mailutils" "geoip-bin" "geoip-database" "ipset" "docker-ce" "docker-ce-cli"
-        "containerd.io" "docker-buildx-plugin" "docker-compose-plugin" "tailscale"
+        "containerd.io" "docker-buildx-plugin" "docker-compose-plugin" "docker-ce-rootless-extras"
+        "tailscale"
     )
     apt-get purge -y "${packages_to_purge[@]}" >/dev/null 2>&1
     apt-get autoremove -y --purge >/dev/null 2>&1
+    apt-get autoclean >/dev/null 2>&1
     log_ok "Alle Kernpakete deinstalliert."
 
     # --- 4. Alle Konfigurations-, Daten- & Skript-Dateien entfernen ---
@@ -1852,11 +1915,13 @@ module_cleanup() {
     # APT-Quellen
     rm -f /etc/apt/sources.list.d/{docker,tailscale,crowdsec_crowdsec}.list
     rm -f /etc/apt/keyrings/{docker,tailscale-archive-keyring}.gpg
-    # Konfig & Daten
+    # Docker-spezifische Bereinigung
+    rm -rf /var/lib/docker /var/lib/containerd /etc/docker ~/.docker
+    ip link delete docker0 >/dev/null 2>&1 || true
+    # Sonstige Konfig & Daten
     rm -rf /etc/aide/ /var/lib/aide/
     rm -rf /etc/rkhunter.conf.d/ /etc/rkhunter.conf /var/lib/rkhunter/
     rm -rf /etc/crowdsec/ /var/lib/crowdsec/
-    rm -rf /etc/docker/
     rm -rf /etc/nftables.d/ /etc/nftables.conf
     # systemd Unit-Dateien und Journald-Konfigs
     rm -f /etc/systemd/system/{aide-check,rkhunter-check,geoip-update,system-backup,unattended-upgrades-run,crowdsec-healthcheck,dailyaidecheck}.*
