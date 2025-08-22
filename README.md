@@ -15,11 +15,11 @@
 
 ## 🎯 Philosophie & Konzept
 
-Der Server-Baukasten v3.0 ist mehr als nur ein Setup-Skript. Er ist ein Framework, das auf drei Kernprinzipien basiert:
+Der Server-Baukasten ist ein pragmatisches Werkzeug, das auf drei Kernprinzipien basiert:
 
 1. **Defense in Depth (Mehrschichtige Sicherheit):** Das System implementiert mehrere unabhängige Sicherheitsschichten - NFTables-Firewall, CrowdSec IPS, GeoIP-Blocking, AppArmor und Kernel-Härtung. Selbst wenn eine Schicht umgangen wird, greifen die anderen.
 
-2. **Moderne Werkzeuge, keine Kompromisse:** Wir ersetzen konsequent Legacy-Tools durch ihre modernen, überlegenen Nachfolger: `nftables` statt `iptables`, `systemd-Timer` statt `cron` und `CrowdSec` statt `fail2ban`.
+2. **Moderne & einfache Werkzeuge:** Wir ersetzen konsequent Legacy-Tools durch ihre modernen Nachfolger (`nftables`, `systemd`, `CrowdSec`). Gleichzeitig wurde als Basis bewusst ein **einfaches Bash-Skript** gewählt – anstelle von komplexen Konfigurations-Management-Systemen wie Ansible oder Puppet. Das macht das System extrem transparent, portabel und ohne zusätzliche Abhängigkeiten auf jedem Standard-Server sofort lauffähig.
 
 3. **Infrastructure as Code (IaC):** Dein Server wird durch eine Konfigurationsdatei definiert. Anstatt Backups des Betriebssystems zu erstellen, kannst du mit dem Baukasten jederzeit einen identischen, sicheren Server aus dem Nichts neu erschaffen.
 
