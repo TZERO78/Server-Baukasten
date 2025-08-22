@@ -1,57 +1,73 @@
-# 🏗️ Server-Baukasten v3.0
+# Server-Baukasten v3.0
 
 **Pragmatisches Starter-Hardening für Home-Server & kleine VPS**
 
-> 🚀 **In ~20 Minuten wird ein frischer Debian/Ubuntu-Server mit einer soliden Sicherheits-Basis ausgestattet.**
->
-> Kernidee: VPN-only (Tailscale) oder gehärteter Public-Mode → alle nicht benötigten Ports werden per Drop-Policy blockiert. Ziel ist nicht „Enterprise-Hardening", sondern ein praktischer Starter für Home- und VPS-User, um Angriffsfläche schnell zu minimieren.
+Ein einfaches Bash-Script, das einen frischen Debian/Ubuntu-Server in ~20 Minuten mit einer soliden Sicherheits-Basis ausstattet.
+
+**Kernidee:** VPN-only (Tailscale) oder gehärteter Public-Mode. Alle nicht benötigten Ports werden per Drop-Policy blockiert. 
+
+**Ziel:** Nicht Enterprise-Hardening, sondern ein praktischer Starter für Home- und VPS-User, um Angriffsfläche schnell zu minimieren.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Bash Shell](https://img.shields.io/badge/Shell-Bash-green.svg)](https://www.gnu.org/software/bash/)
 [![Debian](https://img.shields.io/badge/OS-Debian%2012-red.svg)](https://www.debian.org/)
 [![Ubuntu](https://img.shields.io/badge/OS-Ubuntu%2022.04+-orange.svg)](https://ubuntu.com/)
 
+## Warum Bash statt Ansible/Puppet?
+
+**Bewusste Entscheidung für Einfachheit:**
+
+- **Keine Dependencies:** Läuft sofort auf jedem Standard-Server
+- **Vollständig transparent:** Jede Zeile Code ist nachvollziehbar  
+- **Zielgruppe:** Home-User und VPS-Bastler, nicht Enterprise-Admins
+- **Lerneffekt:** Du siehst genau, was konfiguriert wird
+- **Portabilität:** Funktioniert überall wo Bash verfügbar ist
+
+Ansible ist technisch "sauberer", aber für die Zielgruppe überdimensioniert. Dieses Script soll schnell und verständlich sein, nicht perfekt.
+
 ---
 
-## 🎯 Philosophie & Konzept
+## Konzept & Philosophie
 
-Der Server-Baukasten ist ein pragmatisches Starter-Tool, das auf drei Kernprinzipien basiert:
+Der Server-Baukasten ist ein pragmatisches Starter-Tool mit drei Grundprinzipien:
 
-1. **Solides Sicherheitsfundament:** Das Skript legt mehrere Basisschutz-Schichten an - NFTables-Firewall, CrowdSec IPS, GeoIP-Blocking und Kernel-Härtung. Es ist **kein vollständiges Enterprise-System**, sondern bietet dir eine sichere Ausgangsbasis, auf der du aufbauen kannst.
+**1. Solides Sicherheitsfundament**
+Das Script implementiert mehrere Basisschutz-Schichten: NFTables-Firewall, CrowdSec IPS, GeoIP-Blocking und Kernel-Härtung. Es ist kein vollständiges Enterprise-System, sondern bietet eine sichere Ausgangsbasis für eigene Projekte.
 
-2. **Einfachheit vor Komplexität:** Bewusst als **simples Bash-Skript** entwickelt – kein Ansible, kein Puppet, keine komplexen Dependencies. Läuft auf jedem Standard-Server sofort und ist komplett transparent nachvollziehbar. Du behältst die Kontrolle und verstehst, was passiert.
+**2. Einfachheit vor Perfektion**  
+Bewusst als simples Bash-Script entwickelt - transparent, nachvollziehbar, ohne externe Dependencies. Du behältst die volle Kontrolle und verstehst jeden Schritt.
 
-3. **Reproduzierbares Setup:** Dein Server wird durch eine Konfigurationsdatei definiert. Du kannst jederzeit einen identischen, gehärteten Server neu aufsetzen – perfekt für Experimente oder Disaster Recovery.
+**3. Reproduzierbares Setup**
+Server-Konfiguration über Config-File. Ermöglicht identische, gehärtete Server-Setups für Experimente oder Disaster Recovery.
 
-**Was es NICHT ist:** Eine vollautomatische Enterprise-Lösung oder ein Ansible-Ersatz. Es schafft nur das **sichere Fundament** – für deine spezifischen Services musst du selbst Hand anlegen.
+**Was es NICHT ist:** Eine vollautomatische Enterprise-Lösung. Es schafft das sichere Fundament - für spezifische Services musst du selbst Hand anlegen.
 
 ### Zwei Sicherheitsmodelle
 
-**Modell 1: Maximale Sicherheit (VPN-Only)**
-- Server ist nur über Tailscale VPN erreichbar
-- Alle öffentlichen Ports geschlossen - kein direkter Internet-Zugang
+**Modell 1: VPN-Only (Empfohlen)**
+- Server nur über Tailscale VPN erreichbar
+- Alle öffentlichen Ports geschlossen
 - Ideal für private Server und Entwicklungsumgebungen
 
-**Modell 2: Öffentlich zugänglich (Gehärtet)**
-- Server kann öffentliche Dienste bereitstellen
+**Modell 2: Gehärteter Public-Mode**
+- Server kann öffentliche Dienste bereitstellen  
 - Starkes Sicherheitsfundament durch moderne Tools
-- Ideal als Basis für Webserver, APIs oder andere öffentliche Services
-- Auch ohne VPN deutlich sicherer als Standard-Installationen
+- Deutlich sicherer als Standard-Installationen
 
-## 💡 Automatischer Download von Komponenten
+## Automatischer Download von Komponenten
 
-Das Skript lädt alle benötigten Komponenten automatisch von GitHub herunter:
-- **Konfigurationsvorlagen** für AIDE, RKHunter und andere Tools
-- **Management-Skripte** wie geoip-manager und update-geoip-sets  
-- **Vorgefertigte Systemd-Units** für Timer und Services
+Das Script lädt alle benötigten Komponenten automatisch von GitHub:
+- Konfigurationsvorlagen für AIDE, RKHunter und andere Tools
+- Management-Skripte wie geoip-manager und update-geoip-sets  
+- Vorgefertigte Systemd-Units für Timer und Services
 
-Du musst nur das Hauptskript und die Konfigurationsdatei herunterladen - der Rest passiert automatisch!
+Du benötigst nur das Hauptskript und die Konfigurationsdatei - der Rest wird automatisch geladen.
 
-## ⚠️ Wichtige Voraussetzungen
+## Wichtige Voraussetzungen
 
 ### Tailscale-Account erforderlich
 
-**Für die VPN-Features des Server-Baukastens benötigst du einen kostenlosen Tailscale-Account:**
+**Für die VPN-Features benötigst du einen kostenlosen Tailscale-Account:**
 
 1. **Registrierung:** [tailscale.com](https://tailscale.com) (kostenlos für bis zu 20 Geräte)
 2. **Auth-Key generieren:** 
@@ -71,7 +87,7 @@ Du musst nur das Hauptskript und die Konfigurationsdatei herunterladen - der Res
 - **Internet:** Stabile Verbindung für Downloads
 - **E-Mail:** SMTP-Server für Benachrichtigungen (optional)
 
-## ✨ Haupt-Features
+## Haupt-Features
 
 | Kategorie | Feature | Beschreibung |
 | :--- | :--- | :--- |
