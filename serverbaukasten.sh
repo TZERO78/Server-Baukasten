@@ -27,7 +27,7 @@
 set -e
 set -o pipefail
 
-readonly SCRIPT_VERSION="3.1"
+readonly SCRIPT_VERSION="4.0"
 readonly CROWDSEC_MAXRETRY_DEFAULT=5
 readonly CROWDSEC_BANTIME_DEFAULT="48h" 
 readonly SSH_PORT_DEFAULT=22
@@ -351,6 +351,264 @@ validate_countries_with_feedback() {
 #
 ################################################################################
 
+# ═══════════════════════════════════════════════════════════════════════════════
+# SUDOERS BEST PRACTICE INTEGRATION
+# - Sicheres, atomares Schreiben von sudoers-Einträgen
+# ═══════════════════════════════════════════════════════════════════════════════
+
+##
+# Validiert und schreibt sudoers-Einträge atomar mit vollständiger Fehlerprüfung.
+# @param string $1 Der sudoers-Inhalt (z.B. "user ALL=(ALL:ALL) ALL")
+# @param string $2 Zieldatei (z.B. "/etc/sudoers.d/50-user")
+# @return int 0=Erfolg, 1=Fehler
+##
+write_sudoers_entry_safe() {
+    local content="$1"
+    local target_file="$2"
+    
+    # 🛡️ GUARD: Parameter-Validierung
+    if [ -z "$content" ] || [ -z "$target_file" ]; then
+        log_error "write_sudoers_entry_safe: Fehlende Parameter"
+        return 1
+    fi
+    
+    # 🧪 Erstelle temporäre Datei für Validierung
+    local temp_file
+    temp_file=$(mktemp) || {
+        log_error "Konnte temporäre Datei nicht erstellen"
+        return 1
+    }
+    
+    # 🔒 Cleanup-Trap für temp file (lokaler scope)
+    trap "rm -f '$temp_file'" RETURN
+    
+    # ✍️ Schreibe Inhalt in temporäre Datei
+    printf '%s\n' "$content" > "$temp_file"
+    
+    # 🔍 KRITISCH: visudo-Validierung VOR dem Schreiben
+    if ! visudo -cf "$temp_file" >/dev/null 2>&1; then
+        log_error "sudoers-Syntax ungültig: '$content'"
+        return 1
+    fi
+    
+    # 🎯 Atomares Installieren mit korrekten Berechtigungen
+    if ! install -o root -g root -m 0440 "$temp_file" "$target_file"; then
+        log_error "Konnte sudoers-Datei nicht schreiben: $target_file"
+        return 1
+    fi
+    
+    # 🧹 Finale Konsistenz-Prüfung des gesamten sudoers-Systems
+    if ! visudo -c >/dev/null 2>&1; then
+        log_error "KRITISCH: sudoers-System ist inkonsistent geworden!"
+        # Versuche Rollback
+        rm -f "$target_file"
+        return 1
+    fi
+    
+    log_debug "sudoers-Eintrag sicher geschrieben: $target_file"
+    return 0
+}
+
+##
+# ZENTRALE sudo-Rechte-Verwaltung für Admin-User
+# @param string $1 Aktion: "grant_temp"|"restore_normal"|"emergency_cleanup"
+# @return int 0=Erfolg, 1=Fehler
+##
+manage_admin_sudo_rights() {
+    local action="$1"
+    
+    # 🛡️ GUARD: Validierung
+    if [ -z "${ADMIN_USER:-}" ]; then
+        log_error "ADMIN_USER ist nicht gesetzt – sudo-Verwaltung nicht möglich"
+        return 1
+    fi
+    
+    if [ -z "$action" ]; then
+        log_error "manage_admin_sudo_rights: Keine Aktion angegeben"
+        return 1
+    fi
+    
+    case "$action" in
+        "grant_temp")
+            log_info "🔓 Gewähre temporäre NOPASSWD-Rechte für Setup-Phase..."
+            if write_sudoers_entry_safe \
+                "$ADMIN_USER ALL=(ALL:ALL) NOPASSWD:ALL" \
+                "/etc/sudoers.d/99-temp-setup-$ADMIN_USER"; then
+                log_ok "Temporäre sudo-Rechte ohne Passwort für '$ADMIN_USER' gewährt."
+            else
+                log_error "Konnte temporäre sudo-Rechte nicht gewähren!"
+                return 1
+            fi
+            ;;
+            
+        "restore_normal")
+            log_info "🔒 Stelle Standard-sudo-Sicherheit wieder her..."
+            
+            # 1) Entferne ALLE temporären Berechtigungen
+            rm -f "/etc/sudoers.d/99-temp-setup-$ADMIN_USER"
+            rm -f "/etc/sudoers.d/99-$ADMIN_USER"  # Legacy cleanup
+            
+            # 2) Setze Standard-Berechtigung (MIT Passwort-Abfrage)
+            if write_sudoers_entry_safe \
+                "$ADMIN_USER ALL=(ALL:ALL) ALL" \
+                "/etc/sudoers.d/50-$ADMIN_USER"; then
+                log_ok "Standard-sudo-Sicherheit wiederhergestellt. '$ADMIN_USER' benötigt jetzt Passwort."
+            else
+                log_error "Konnte Standard-sudo-Regel nicht setzen!"
+                return 1
+            fi
+            ;;
+            
+        "emergency_cleanup")
+            log_warn "🚨 Notfall-Cleanup der sudo-Rechte..."
+            
+            # Entferne ALLE temporären Dateien (sicher)
+            rm -f "/etc/sudoers.d/99-temp-setup-$ADMIN_USER"
+            rm -f "/etc/sudoers.d/99-$ADMIN_USER"
+            
+            # Nur Fallback erstellen, wenn keine normale Regel existiert
+            if [ ! -f "/etc/sudoers.d/50-$ADMIN_USER" ]; then
+                log_warn "Erstelle Notfall-sudo-Regel für '$ADMIN_USER'..."
+                if write_sudoers_entry_safe \
+                    "$ADMIN_USER ALL=(ALL:ALL) ALL" \
+                    "/etc/sudoers.d/50-$ADMIN_USER"; then
+                    log_ok "Notfall-sudo-Regel erfolgreich erstellt."
+                else
+                    log_error "KRITISCH: Konnte Notfall-sudo-Regel nicht erstellen!"
+                    log_error "User '$ADMIN_USER' hat möglicherweise KEINE sudo-Rechte mehr!"
+                    return 1
+                fi
+            else
+                log_info "Standard-sudo-Regel für '$ADMIN_USER' bereits vorhanden."
+            fi
+            ;;
+            
+        *)
+            log_error "Ungültige Aktion für manage_admin_sudo_rights: '$action'"
+            log_error "Gültige Aktionen: grant_temp, restore_normal, emergency_cleanup"
+            return 1
+            ;;
+    esac
+    
+    return 0
+}
+
+##
+# Audit-Funktion für sudo-Berechtigungen (für Debugging/Verifikation)
+##
+audit_sudo_permissions() {
+    log_info "🔍 Audit der aktuellen sudo-Berechtigungen:"
+    
+    # Zeige alle sudoers.d-Dateien mit Inhalt
+    if ls /etc/sudoers.d/* >/dev/null 2>&1; then
+        for file in /etc/sudoers.d/*; do
+            if [ -f "$file" ] && [ -r "$file" ]; then
+                log_info "  📄 $(basename "$file"):"
+                while IFS= read -r line; do
+                    # Nur nicht-leere, nicht-kommentierte Zeilen anzeigen
+                    if [[ "$line" =~ ^[^#]*[A-Za-z] ]]; then
+                        log_info "    → $line"
+                    fi
+                done < "$file"
+            fi
+        done
+    else
+        log_info "  📄 Keine Dateien in /etc/sudoers.d/"
+    fi
+    
+    # Zeige sudo-Gruppenmitglieder
+    local sudo_members
+    sudo_members=$(getent group sudo 2>/dev/null | cut -d: -f4 || echo "")
+    if [ -n "$sudo_members" ]; then
+        log_info "  👥 sudo-Gruppe: $sudo_members"
+    else
+        log_info "  👥 sudo-Gruppe: keine Mitglieder"
+    fi
+    
+    # Konsistenz-Check
+    if visudo -c >/dev/null 2>&1; then
+        log_info "  ✅ sudoers-System ist konsistent"
+    else
+        log_error "  ❌ sudoers-System hat SYNTAXFEHLER!"
+    fi
+    
+    # Spezifische Prüfung für ADMIN_USER
+    if [ -n "${ADMIN_USER:-}" ]; then
+        if id "$ADMIN_USER" >/dev/null 2>&1; then
+            local user_groups
+            user_groups=$(groups "$ADMIN_USER" 2>/dev/null)
+            log_info "  🙋 '$ADMIN_USER' Gruppen: $user_groups"
+            
+            # Test sudo-Fähigkeit (ohne Command auszuführen)
+            if sudo -l -U "$ADMIN_USER" >/dev/null 2>&1; then
+                log_info "  ✅ '$ADMIN_USER' hat sudo-Berechtigung"
+            else
+                log_warn "  ⚠️ '$ADMIN_USER' hat KEINE sudo-Berechtigung"
+            fi
+        else
+            log_warn "  ⚠️ User '$ADMIN_USER' existiert nicht auf dem System"
+        fi
+    fi
+}
+
+##
+# SECURITY: Bereinige ALLE temporären sudo-Einträge (für module_cleanup)
+##
+cleanup_all_temporary_sudo_entries() {
+    log_info "🧹 Bereinige alle temporären sudo-Einträge systemweit..."
+    
+    local cleaned=0
+    
+    # Entferne alle Dateien mit temporären Mustern
+    for pattern in "99-temp-*" "99-*-temp-*" "*-temporary-*"; do
+        find /etc/sudoers.d/ -name "$pattern" -type f 2>/dev/null | while read -r file; do
+            log_info "  🗑️ Entferne temporäre sudo-Datei: $(basename "$file")"
+            rm -f "$file"
+            ((cleaned++))
+        done
+    done
+    
+    # Prüfe verbliebene 99-* Dateien auf NOPASSWD (Legacy cleanup)
+    find /etc/sudoers.d/ -name "99-*" -type f 2>/dev/null | while read -r file; do
+        if grep -q "NOPASSWD" "$file" 2>/dev/null; then
+            log_info "  🗑️ Entferne Legacy-NOPASSWD-Datei: $(basename "$file")"
+            rm -f "$file"
+            ((cleaned++))
+        fi
+    done
+    
+    if [ $cleaned -gt 0 ]; then
+        log_ok "$cleaned temporäre sudo-Dateien bereinigt."
+    else
+        log_info "Keine temporären sudo-Dateien gefunden."
+    fi
+    
+    # Finale Konsistenz-Prüfung nach Cleanup
+    if ! visudo -c >/dev/null 2>&1; then
+        log_error "WARNUNG: sudoers-System nach Cleanup inkonsistent!"
+    fi
+}
+
+##
+# Entfernt die temporären NOPASSWD-Rechte und stellt die Standard-sudo-Konfiguration wieder her.
+##
+cleanup_admin_sudo_rights() {
+    manage_admin_sudo_rights "restore_normal"
+}
+##
+# Notfall-Bereinigung der sudo-Rechte, falls das Skript vorzeitig abbricht.
+##
+cleanup_admin_sudo_rights_emergency() {
+    manage_admin_sudo_rights "emergency_cleanup"
+}
+
+##
+# Gewährt temporäre NOPASSWD-Rechte für die Setup-Phase.
+# Wrapper-Funktion für manage_admin_sudo_rights mit "grant_temp" Aktion.
+##
+grant_temporary_sudo_rights() {
+    manage_admin_sudo_rights "grant_temp"
+}
 
 # ===============================================================================
 #  LOGGING-SYSTEM v3.0
@@ -519,33 +777,6 @@ set_config_value() {
     sed -i -E "/^\s*#?\s*${key}/d" "$file"
     echo "${key} ${value}" >> "$file"
 }
-##
-# Entfernt die temporären NOPASSWD-Rechte und stellt die Standard-sudo-Konfiguration wieder her.
-##
-cleanup_admin_sudo_rights() {
-    log_info "🔒 Stelle Standard-sudo-Sicherheit wieder her..."
-    
-    rm -f "/etc/sudoers.d/99-$ADMIN_USER"
-    echo "$ADMIN_USER ALL=(ALL:ALL) ALL" > "/etc/sudoers.d/50-$ADMIN_USER"
-    chmod 440 "/etc/sudoers.d/50-$ADMIN_USER"
-    
-    log_ok "Sudo-Sicherheit wiederhergestellt. Passwort-Abfrage für '$ADMIN_USER' ist jetzt aktiv."
-}
-##
-# Notfall-Bereinigung der sudo-Rechte, falls das Skript vorzeitig abbricht.
-##
-cleanup_admin_sudo_rights_emergency() {
-    log_warn "🚨 Notfall-Cleanup: Entferne temporäre NOPASSWD-Rechte..."
-    
-    rm -f "/etc/sudoers.d/99-$ADMIN_USER"
-    
-    # Stellt sicher, dass der Admin-User seine sudo-Rechte nicht verliert
-    if [ ! -f "/etc/sudoers.d/50-$ADMIN_USER" ]; then
-        log_info "  -> Permanente sudo-Regel nicht gefunden, wird als Fallback neu erstellt."
-        echo "$ADMIN_USER ALL=(ALL:ALL) ALL" > "/etc/sudoers.d/50-$ADMIN_USER"
-        chmod 440 "/etc/sudoers.d/50-$ADMIN_USER"
-    fi
-}
 
 ##
 # Bietet an, die Konfigurationsdatei mit sensiblen Daten am Ende des Skripts sicher zu löschen.
@@ -630,6 +861,50 @@ download_and_process_template() {
     log_ok "Vorlage '$template_name' erfolgreich nach '$dest_path' installiert."
 }
 
+##
+# Stellt iptables auf nft-Backend um und sichert den nftables-Dienst ab.
+##
+setup_iptables_nft_backend() {
+    log_info "🔗 Stelle iptables auf NFT-Backend um..."
+    
+    # IPv4 + IPv6 iptables auf NFT umstellen
+    run_with_spinner "Konfiguriere iptables-nft..." \
+        "update-alternatives --set iptables /usr/sbin/iptables-nft && \
+         update-alternatives --set ip6tables /usr/sbin/ip6tables-nft"
+    
+    # Kurze Verifikation
+    if iptables --version 2>/dev/null | grep -q "nf_tables"; then
+        log_ok "iptables nutzt jetzt nf_tables-Backend"
+    else
+        log_warn "iptables-nft Verifikation fehlgeschlagen"
+    fi
+
+    # --- NEU: systemd Drop-in für nftables.service ---
+    log_info "🛡️  Sichere den nftables-Dienst gegen unbeabsichtigtes Leeren ab..."
+    
+    local override_dir="/etc/systemd/system/nftables.service.d"
+    local override_file="$override_dir/override.conf"
+
+    # Verzeichnis erstellen
+    mkdir -p "$override_dir"
+
+    # Drop-in-Datei schreiben. Verhindert, dass 'systemctl stop nftables' die Regeln löscht.
+    # Dies ist ein wichtiges Sicherheitsmerkmal, besonders in Produktionsumgebungen.
+    cat > "$override_file" <<'EOF'
+[Service]
+# Standard ExecStop neutralisieren, um das Leeren der Regeln zu verhindern
+ExecStop=
+ExecStop=/bin/true
+# Definiere einen sauberen Reload-Befehl
+ExecReload=/usr/sbin/nft -f /etc/nftables.conf
+EOF
+
+    log_ok "systemd Drop-in-Datei '$override_file' erstellt."
+
+    # systemd neu laden, um die Änderung zu übernehmen
+    run_with_spinner "Lade systemd-Konfiguration neu..." "systemctl daemon-reload"
+}
+
 ###########################################################################################
 #
 #                      SETUP-FUNKTIONEN FÜR SERVER-SICHERHEIT
@@ -686,9 +961,8 @@ setup_basic_security() {
 setup_firewall_infrastructure() {
     log_info "🔥 MODUL: Firewall-Infrastruktur (NFTables)"
     
-    # Installation und Konfiguration der iptables-Alternative in einem Schritt
-    run_with_spinner "Installiere NFTables und setze iptables-Alternative..." \
-        "apt-get install -y nftables && update-alternatives --set iptables /usr/sbin/iptables-nft"
+    # Installation von NFTables mit Feedback
+    run_with_spinner "Installiere NFTables..." "apt-get install -y nftables"
     
     # Die Funktion generate_nftables_config hat bereits eigene, passende log_* Aufrufe
     generate_nftables_config
@@ -1109,15 +1383,22 @@ TAILSCALE_INTERFACE="$tailscale_interface"
 EOF
 }
 
+# ===============================================================================
+#          MODULARE & DYNAMISCHE NFTABLES-GENERIERUNG (FINAL v3.2)
+#
+#   Dieser Block implementiert die Best Practice für nftables:
+#   - /etc/nftables.conf ist nur noch ein minimalistischer Lader.
+#   - Die eigentlichen Regeln liegen in /etc/nftables.d/
+#   - Dies verhindert Konflikte mit Docker und anderen Diensten.
+# ===============================================================================
+
 ##
-# Generiert die GeoIP-Set-Definitionen, falls GeoIP aktiviert ist.
+# Generiert die GeoIP-Set-Definitionen in der Regeldatei.
 ##
 generate_geoip_sets_section() {
     if [ "${ENABLE_GEOIP_BLOCKING:-nein}" = "ja" ]; then
         cat << 'GEOIP_SETS'
-    # ═══════════════════════════════════════════════════════════════════════════
-    # GeoIP-Sets (werden aus dieser Datei bei jedem Start geladen)
-    # ═══════════════════════════════════════════════════════════════════════════
+    # GeoIP-Sets für die geografische Filterung
     set geoip_blocked_v4 { type ipv4_addr; flags interval; }
     set geoip_blocked_v6 { type ipv6_addr; flags interval; }
     set geoip_home_v4 { type ipv4_addr; flags interval; }
@@ -1125,269 +1406,184 @@ generate_geoip_sets_section() {
     set geoip_allowlist_v4 { type ipv4_addr; flags interval; }
     set geoip_allowlist_v6 { type ipv6_addr; flags interval; }
 
-    # GeoIP-Chain (wird von configure_geoip_system() befüllt)
+    # GeoIP-Chain, in die gesprungen wird
     chain geoip_check {}
 GEOIP_SETS
     fi
 }
 
 ##
-# Generiert die 'jump'-Regel zur GeoIP-Chain, falls GeoIP aktiviert ist.
+# Generiert die 'jump'-Regel zur GeoIP-Chain.
 ##
 generate_geoip_jump_section() {
     if [ "${ENABLE_GEOIP_BLOCKING:-nein}" = "ja" ]; then
         cat << 'EOF'
+        # STUFE 3: Geografische Filterung
         jump geoip_check comment "GeoIP-Filter"
 EOF
     fi
 }
 
 ##
-# KORRIGIERT: Docker-Input nur bei SERVER_ROLE="1"
-##
-generate_docker_input_section() {
-    if [ "$SERVER_ROLE" = "1" ] && [ "$DOCKER_ACTIVE" = "true" ] && [ "$DOCKER_INTERFACE_EXISTS" = "true" ]; then
-        cat << 'EOF'
-        ip saddr $docker_networks_v4 accept comment "Docker-Container IPv4"
-        ip6 saddr $docker_networks_v6 accept comment "Docker-Container IPv6"
-        iifname "docker0" accept comment "Docker-Bridge-Interface"
-EOF
-    fi
-}
-
-##
-# KORRIGIERT: Tailscale-Input mit korrekter Einrückung
+# Erlaubt eingehenden Traffic von der Tailscale-Schnittstelle.
 ##
 generate_tailscale_input_section() {
     if [ "$TAILSCALE_ACTIVE" = "true" ] && [ -n "$TAILSCALE_INTERFACE" ]; then
         cat << EOF
-        iifname "$TAILSCALE_INTERFACE" accept comment "Allow-Input-from-Tailscale-Interface"
+        iifname "$TAILSCALE_INTERFACE" accept comment "Input vom Tailscale-Interface"
 EOF
     fi
 }
 
 ##
-# KORRIGIERT: Docker-Forward nur bei SERVER_ROLE="1"
-##
-generate_docker_forward_section() {
-    if [ "$SERVER_ROLE" = "1" ] && [ "$DOCKER_ACTIVE" = "true" ] && [ "$DOCKER_INTERFACE_EXISTS" = "true" ]; then
-        cat << 'EOF'
-        # Docker-Container Forwarding
-        iifname "docker0" oifname != "docker0" accept comment "Docker-to-External"
-        iifname != "docker0" oifname "docker0" ct state related,established accept comment "External-to-Docker-Reply"
-EOF
-    fi
-}
-
-##
-# KORRIGIERT: Tailscale-Forward für beide Server-Rollen mit intelligenter Docker-Erkennung
+# Konfiguriert das Forwarding für Tailscale (z.B. Subnet-Routing).
 ##
 generate_tailscale_forward_section() {
     if [ "$TAILSCALE_ACTIVE" = "true" ] && [ -n "$TAILSCALE_INTERFACE" ]; then
-        # Für SERVER_ROLE="1": Tailscale ↔ Docker Forwarding (nur wenn Docker aktiv)
-        if [ "$SERVER_ROLE" = "1" ] && [ "$DOCKER_ACTIVE" = "true" ] && [ "$DOCKER_INTERFACE_EXISTS" = "true" ]; then
-            cat << EOF
-        iifname "$TAILSCALE_INTERFACE" oifname "docker0" accept comment "Allow-Forward-Tailscale-to-Docker"
-        iifname "docker0" oifname "$TAILSCALE_INTERFACE" accept comment "Allow-Forward-Docker-to-Tailscale"
-EOF
-        fi
-        
-        # Für beide Rollen: Allgemeine Tailscale-Forwarding-Regeln (Subnet-Routing etc.)
         cat << EOF
-        # Tailscale VPN Forwarding
-        iifname "$TAILSCALE_INTERFACE" oifname != "$TAILSCALE_INTERFACE" accept comment "Tailscale-to-External"
-        iifname != "$TAILSCALE_INTERFACE" oifname "$TAILSCALE_INTERFACE" ct state related,established accept comment "External-to-Tailscale-Reply"
+        # Erlaube Traffic vom VPN in andere Netze und etablierte Antworten
+        iifname "$TAILSCALE_INTERFACE" accept comment "Forward vom Tailscale-Interface"
+        oifname "$TAILSCALE_INTERFACE" ct state related,established accept comment "Forward-Antworten an Tailscale"
 EOF
     fi
 }
 
 ##
-# KORRIGIERT: Docker-NAT nur bei SERVER_ROLE="1" - RICHTIGE EINRÜCKUNG
-##
-generate_docker_nat_section() {
-    if [ "$SERVER_ROLE" = "1" ] && [ "$DOCKER_ACTIVE" = "true" ] && [ "$DOCKER_INTERFACE_EXISTS" = "true" ]; then
-        cat << EOF
-        oifname "$PRIMARY_INTERFACE" iifname "docker0" masquerade comment "Docker-IPv4-NAT"
-EOF
-    fi
-}
-
-##
-# Tailscale-NAT für beide Server-Rollen (für Subnet-Routing/Exit-Node) - RICHTIGE EINRÜCKUNG
+# Generiert die NAT-Regel für Tailscale (Subnet-Routing / Exit-Node).
 ##
 generate_tailscale_nat_section() {
-    if [ "$TAILSCALE_ACTIVE" = "true" ] && [ -n "$TAILSCALE_INTERFACE" ]; then
-        cat << EOF
-        oifname "$PRIMARY_INTERFACE" iifname "$TAILSCALE_INTERFACE" masquerade comment "Tailscale-IPv4-NAT"
+    # Diese Funktion wird nur aufgerufen, wenn Tailscale aktiv ist.
+    cat << EOF
+        oifname "$PRIMARY_INTERFACE" iifname "$TAILSCALE_INTERFACE" masquerade comment "Tailscale NAT für Subnet-Routing/Exit-Node"
 EOF
-    fi
 }
 
 ##
-# KORRIGIERT: Erstellt die komplette /etc/nftables.conf Datei mit modularen Template-Funktionen.
+# NEU: Schreibt die eigentlichen Baukasten-Regeln in eine separate Datei.
 ##
-generate_nftables_config() {
-    log_info "🔥 Generiere NFTables-Konfiguration..."
+generate_baukasten_rules_file() {
+    log_info "  -> Erstelle Baukasten-Regeldatei in /etc/nftables.d/..."
+    local rules_file="/etc/nftables.d/10-server-baukasten.conf"
 
-    # System-Zustand ermitteln
+    # System-Zustand für Variablen wie TAILSCALE_ACTIVE etc. ermitteln
     local system_state; system_state=$(detect_system_state); source <(echo "$system_state")
 
-    # ✅ SAUBERE TRENNUNG: Private Netze vs. Container-Netze
-    local private_nets_v4="10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 127.0.0.0/8"
-    local private_nets_v6="::1/128, fc00::/7, fe80::/10"
-    
-    # Docker-Netze SEPARAT definieren - KORRIGIERT: Nur wenn SERVER_ROLE="1" UND Variablen gesetzt
-    local docker_nets_v4=""
-    local docker_nets_v6=""
-    local has_docker_config=false
-    
-    if [ "$SERVER_ROLE" = "1" ] && [ -n "${DOCKER_IPV4_CIDR:-}" ] && [ -n "${DOCKER_IPV6_CIDR:-}" ]; then
-        docker_nets_v4="$DOCKER_IPV4_CIDR"
-        docker_nets_v6="$DOCKER_IPV6_CIDR"
-        has_docker_config=true
-        log_info "  -> Docker-Konfiguration erkannt: $docker_nets_v4, $docker_nets_v6"
-    else
-        log_info "  -> Keine Docker-Konfiguration (SERVER_ROLE=$SERVER_ROLE)"
-    fi
-
-    # NFTables-Config Basis
-    cat > /etc/nftables.conf <<EOF
-#!/usr/sbin/nft -f
+    # Schreibe die Filter-Regeln
+    cat > "$rules_file" <<EOF
 # =============================================================================
-# SERVER-BAUKASTEN FIREWALL v2.0 (Modulare Architektur)
-# =============================================================================
-# Generiert am: $(date)
-# System: $(hostname) - $(uname -r)
-# Server-Rolle: ${SERVER_ROLE} (1=Docker, 2=Einfach)
-#
-# Diese Firewall implementiert eine mehrstufige Sicherheitsarchitektur:
-# 1. Connection Tracking (established/related zuerst)
-# 2. Invalid Packet Dropping (Schutz vor Fragmentierung-Attacken)  
-# 3. Trusted Zone Protection (Loopback, Private Networks, VPN)
-# 4. GeoIP-basierte Länder-Filterung (falls aktiviert)
-# 5. Explizite Service-Freigaben (SSH, ICMP)
+# SERVER-BAUKASTEN BASIS-REGELN (v4.0)
 # =============================================================================
 
-# Netzwerk-Definitionen (dynamisch basierend auf Server-Konfiguration)
-define private_networks_v4 = { ${private_nets_v4} }
-define private_networks_v6 = { ${private_nets_v6} }
-EOF
-
-    # KORRIGIERT: Docker-Definitionen nur wenn tatsächlich benötigt
-    if [ "$has_docker_config" = "true" ]; then
-        cat >> /etc/nftables.conf <<EOF
-define docker_networks_v4 = { ${docker_nets_v4} }
-define docker_networks_v6 = { ${docker_nets_v6} }
-EOF
-    fi
-
-    # Hauptteil der Konfiguration
-    cat >> /etc/nftables.conf <<EOF
-
-# =============================================================================
-# HAUPTFILTER-TABELLE (inet = IPv4 + IPv6 kombiniert)
-# =============================================================================
+# Haupt-Filtertabelle für den Baukasten
 table inet filter {
 $(generate_geoip_sets_section)
 
     # -------------------------------------------------------------------------
-    # INPUT-CHAIN: Eingehender Traffic zum Server
+    # INPUT-CHAIN: Eingehender Traffic zum Server selbst (Priority 10)
     # -------------------------------------------------------------------------
     chain input {
-        type filter hook input priority filter; policy drop;
+        type filter hook input priority 10; policy drop;
 
-        # STUFE 1: Performance-Optimierung - Bekannte Verbindungen sofort durchlassen
+        # STUFE 1: Erlaubte etablierte und ungültige Verbindungen
         ct state established,related accept comment "Aktive Verbindungen"
+        ct state invalid drop comment "Ungültige Pakete"
 
-        # STUFE 2: Sicherheit - Ungültige Pakete sofort verwerfen
-        ct state invalid drop comment "Korrupte Pakete"
+        # STUFE 2: Vertrauenswürdige Quellen (Loopback, VPN)
+        iifname "lo" accept comment "Loopback"
+$(generate_tailscale_input_section)
 
-        # STUFE 3: Vertrauenswürdige Quellen - Interne und Management-Netze
-        iifname "lo" accept comment "Loopback-Interface"
-        ip saddr \$private_networks_v4 accept comment "Private IPv4-Netze"
-        ip6 saddr \$private_networks_v6 accept comment "Private IPv6-Netze"
-$(generate_docker_input_section)$(generate_tailscale_input_section)
-
-        # STUFE 4: Geografische Filterung - Länder-basierte Bedrohungsabwehr
 $(generate_geoip_jump_section)
 
-        # STUFE 5: Öffentliche Dienste - Explizit freigegebene Services
+        # STUFE 4: Explizit freigegebene öffentliche Dienste
         tcp dport ${SSH_PORT} accept comment "SSH-Zugang"
         ip protocol icmp accept comment "IPv4 Ping"
         ip6 nexthdr ipv6-icmp accept comment "IPv6 Ping"
     }
 
     # -------------------------------------------------------------------------
-    # FORWARD-CHAIN: Traffic zwischen Interfaces (Docker, VPN, Routing)
+    # FORWARD-CHAIN: Traffic zwischen Interfaces (Priority 10)
     # -------------------------------------------------------------------------
     chain forward {
-        type filter hook forward priority filter; policy drop;
-        
-        # Basis-Regeln für Forwarding
-        ct state established,related accept comment "Aktive Verbindungen"
-        ct state invalid drop comment "Korrupte Pakete"
-        
-        # Container- und VPN-spezifische Forward-Regeln
-$(generate_docker_forward_section)$(generate_tailscale_forward_section)
+        type filter hook forward priority 10; policy drop;
+        ct state established,related accept comment "Aktive Forward-Verbindungen"
+$(generate_tailscale_forward_section)
     }
 
     # -------------------------------------------------------------------------
-    # OUTPUT-CHAIN: Ausgehender Traffic vom Server
+    # OUTPUT-CHAIN: Ausgehender Traffic vom Server (Priority 10)
     # -------------------------------------------------------------------------
     chain output {
-        type filter hook output priority filter; policy accept;
-        # Ausgehender Traffic wird standardmäßig erlaubt
-        # Bei Bedarf können hier restriktive Regeln ergänzt werden
-      }
+        type filter hook output priority 10; policy accept;
+    }
 }
 EOF
 
-    # KORRIGIERT: NAT-Tabellen nur bei tatsächlichem Bedarf
-    local needs_nat=false
-    
-    # Docker benötigt NAT nur bei SERVER_ROLE="1"
-    if [ "$has_docker_config" = "true" ] && [ "$DOCKER_ACTIVE" = "true" ] && [ "$DOCKER_INTERFACE_EXISTS" = "true" ]; then
-        needs_nat=true
-        log_info "  -> NAT wird für Docker benötigt (SERVER_ROLE=1)"
-    fi
-    
-    # Tailscale kann NAT bei beiden Server-Rollen benötigen (für Subnet-Routing)
-    if [ "$TAILSCALE_ACTIVE" = "true" ] && [ -n "$TAILSCALE_INTERFACE" ]; then
-        needs_nat=true
-        log_info "  -> NAT wird für Tailscale benötigt (VPN-Routing)"
-    fi
-    
-    if [ "$needs_nat" = "true" ]; then
-        cat >> /etc/nftables.conf <<EOF
+    # --- Hänge die separate NAT-Tabelle NUR für Tailscale an ---
+    if [ "${ACCESS_MODEL:-2}" = "1" ] && [ "$TAILSCALE_ACTIVE" = "true" ] && [ -n "$TAILSCALE_INTERFACE" ]; then
+        cat >> "$rules_file" <<EOF
 # =============================================================================
-# NAT-TABELLEN: Network Address Translation für Container und VPN
+# NAT-TABELLE (NUR für Tailscale Subnet Routing / Exit Node)
 # =============================================================================
 table ip nat {
     chain postrouting {
-        type nat hook postrouting priority srcnat; policy accept;
-$(generate_docker_nat_section)$(generate_tailscale_nat_section)
+        type nat hook postrouting priority 100; policy accept;
+$(generate_tailscale_nat_section)
     }
 }
 table ip6 nat {
     chain postrouting {
-        type nat hook postrouting priority srcnat; policy accept;
-$(generate_docker_nat_section | sed 's/IPv4/IPv6/')$(generate_tailscale_nat_section | sed 's/IPv4/IPv6/')
+        type nat hook postrouting priority 100; policy accept;
+$(generate_tailscale_nat_section)
     }
 }
 EOF
-        log_info "  -> NAT-Tabellen hinzugefügt"
-    else
-        log_info "  -> Keine NAT-Tabellen benötigt"
+        log_info "  -> NAT-Regeln für Tailscale wurden zur Regeldatei hinzugefügt."
     fi
+}
 
-    log_ok "NFTables-Konfiguration erfolgreich generiert."
-    
-    # Syntax-Validierung
+
+##
+# FINAL (v4.0): Erstellt die modulare Grundstruktur für nftables.
+##
+generate_nftables_config() {
+    log_info "🔥 Erstelle modulare NFTables-Konfiguration (produktionssicher)..."
+
+    # 1. Sicherstellen, dass das Verzeichnis für modulare Regeln existiert
+    mkdir -p /etc/nftables.d
+
+    # 2. Die Haupt-Konfigurationsdatei wird zu einem simplen Lader
+    cat > /etc/nftables.conf <<'EOF'
+#!/usr/sbin/nft -f
+
+# ==========================================================================
+# SERVER-BAUKASTEN HAUPT-KONFIGURATION (v4.0)
+# ==========================================================================
+# Diese Datei ist nur der Lader. Die eigentlichen Regeln liegen in
+# /etc/nftables.d/ und werden von dort eingebunden.
+#
+# Dieses Setup verhindert Konflikte mit Diensten wie Docker, CrowdSec etc.
+# ==========================================================================
+
+# Leere die Konfiguration nur EINMALIG bei einem kompletten Neustart des
+# nftables.service, um einen sauberen Zustand zu garantieren.
+# Bei einem 'reload' wird dies NICHT ausgeführt, was Docker schützt.
+flush ruleset
+
+# Lade alle Konfigurations-Snippets aus dem .d Verzeichnis
+include "/etc/nftables.d/*.conf"
+EOF
+
+    # 3. Erstelle unsere eigene, detaillierte Regel-Datei
+    generate_baukasten_rules_file
+
+    log_ok "Modulare NFTables-Struktur erfolgreich erstellt."
+
+    # 4. Syntax-Validierung (nft prüft die Hauptdatei inklusive aller includes)
     if ! nft -c -f /etc/nftables.conf >/dev/null 2>&1; then
         log_error "SYNTAX-FEHLER in der generierten NFTables-Konfiguration!"
         return 1
     fi
-    log_ok "Syntax-Validierung erfolgreich."
+    log_ok "Syntax-Validierung der gesamten Konfiguration erfolgreich."
 }
 
 ################################################################################
@@ -1479,19 +1675,20 @@ run_setup() {
     # WICHTIG: Kernel-Härtung VOR den Diensten, die davon abhängen (z.B. IP-Forwarding für Docker)
     module_kernel_hardening
 
-    # --- Phase 3: Kern-Dienste (Netzwerk & Container) ---
-    log_info "Phase 3/5: Kern-Dienste (Netzwerk & Container)..."
-    module_network "$TEST_MODE" # Tailscale
+   # --- Phase 3: Sicherheits-Architektur ---
+    log_info "Phase 3/5: Sicherheits-Architektur (Firewall, IPS, Monitoring)..."
+    # Die Sicherheit wird bewusst am Ende konfiguriert, wenn alle Dienste laufen und ihre Ports bekannt sind
+    module_security "$TEST_MODE"
+    
+
+    # --- Phase 4: Kern-Dienste (Netzwerk & Container) ---
+    log_info "Phase 4/5: Kern-Dienste (Netzwerk & Container)..."
+    module_network "$TEST_MODE" 
     if [ "$SERVER_ROLE" = "1" ]; then
         module_container # Docker Daemon
         module_deploy_containers # Portainer, Watchtower
     fi
-
-    # --- Phase 4: Sicherheits-Architektur ---
-    log_info "Phase 4/5: Sicherheits-Architektur (Firewall, IPS, Monitoring)..."
-    # Die Sicherheit wird bewusst am Ende konfiguriert, wenn alle Dienste laufen und ihre Ports bekannt sind
-    module_security "$TEST_MODE"
-    
+ 
     # --- Phase 5: Abschluss-Arbeiten ---
     log_info "Phase 5/5: Abschluss-Arbeiten (Mail, Logs, Backup, Verifikation)..."
     module_mail_setup
@@ -1942,17 +2139,9 @@ module_cleanup() {
     sed -i '\|/swapfile|d' /etc/fstab
     log_ok "Swap-Datei und fstab-Eintrag entfernt."
 
-    # --- 6. Admin-Benutzer entfernen ---
-    log_info "  -> 6/7: Entferne Admin-Benutzer..."
-    # WICHTIG: ADMIN_USER muss aus der Config geladen oder als Variable verfügbar sein!
-    if id "${ADMIN_USER:-nouser}" &>/dev/null && [ "${ADMIN_USER}" != "root" ]; then
-        # Beende alle Prozesse des Benutzers, bevor er gelöscht wird
-        killall -u "$ADMIN_USER" &>/dev/null
-        userdel -r "$ADMIN_USER" &>/dev/null
-        log_ok "Benutzer '${ADMIN_USER}' und sein Home-Verzeichnis entfernt."
-    else
-        log_warn "Admin-Benutzer '${ADMIN_USER:-nicht definiert}' nicht gefunden oder konnte nicht entfernt werden."
-    fi
+    # --- 6. sudo-Reste bereinigen ---
+    log_info "  -> 6/7: Bereinige temporäre sudo-Einträge systemweit..."
+    cleanup_all_temporary_sudo_entries
 
     # --- 7. Journal bereinigen ---
     log_info "  -> 7/7: Rotiere Journal-Logs für einen sauberen Start..."
@@ -1983,10 +2172,6 @@ EOF
 # MODUL 2: Führt die grundlegende Systemkonfiguration durch.
 # Setzt Hostname, Zeitzone, Locale, Benutzer, Passwörter und installiert Kernpakete.
 ##
-##
-# MODUL 2: Führt die grundlegende Systemkonfiguration durch.
-# Setzt Hostname, Zeitzone, Locale, Benutzer, Passwörter und installiert Kernpakete.
-##
 module_base() {
     log_info "📦 MODUL: Basis-System-Setup"
     
@@ -2009,22 +2194,25 @@ module_base() {
     log_info "  -> 2/7: Konfiguriere Benutzer-Accounts..."
     echo "root:$ROOT_PASSWORD" | chpasswd
     log_ok "Root-Passwort aktualisiert."
-    
+
     if ! id "$ADMIN_USER" &>/dev/null; then
         useradd -m -s /bin/bash "$ADMIN_USER"
         log_ok "Admin-Benutzer '$ADMIN_USER' erstellt."
     else
         log_info "Admin-Benutzer '$ADMIN_USER' existiert bereits."
     fi
-    
+
     echo "$ADMIN_USER:$ADMIN_PASSWORD" | chpasswd
     usermod -aG sudo "$ADMIN_USER"
     log_ok "Admin-Benutzer '$ADMIN_USER' konfiguriert und zur sudo-Gruppe hinzugefügt."
-    
-    echo "$ADMIN_USER ALL=(ALL) NOPASSWD:ALL" > "/etc/sudoers.d/99-$ADMIN_USER"
-    chmod 0440 "/etc/sudoers.d/99-$ADMIN_USER"
+
+    # SICHERE sudo-Rechte-Vergabe:
+    if ! grant_temporary_sudo_rights; then
+        log_error "Konnte temporäre sudo-Rechte nicht gewähren!"
+        exit 1
+    fi
     log_warn "Temporäre NOPASSWD sudo-Rechte für '$ADMIN_USER' aktiviert (werden am Ende entfernt)."
-    
+
     # --- Phase 3/7: Kern-Pakete ---
     log_info "  -> 3/7: Installiere Kern-Pakete..."
     export DEBIAN_FRONTEND=noninteractive
@@ -2095,6 +2283,8 @@ module_base() {
         
         systemctl disable --now docker >/dev/null 2>&1 || true
         log_info "Docker-Engine installiert (Service wird später konfiguriert)."
+        # Konfiguriere iptables-nft Backend für Docker-Kompatibilität
+        setup_iptables_nft_backend
     else
         log_info "  -> 6/7: Docker-Setup übersprungen (Einfacher Server)."
     fi
@@ -2271,6 +2461,7 @@ module_security() {
 
 ##
 # MODUL: Konfiguriert den Docker Daemon mit einem benutzerdefinierten Netzwerk.
+# Inklusive systemd-Override für einen stabilen Start nach der Firewall.
 ##
 module_container() {
     # Führt nur aus, wenn der Server als Docker-Host konfiguriert ist.
@@ -2284,32 +2475,53 @@ module_container() {
     local docker_gateway_ip
     docker_gateway_ip=$(echo "$DOCKER_IPV4_CIDR" | cut -d'/' -f1 | sed 's/\.0$//').1
     
-    log_info "  -> Erstelle Docker-Konfiguration (daemon.json) für Netzwerk ${DOCKER_IPV4_CIDR}..."
+    log_info "  -> Erstelle Docker-Konfiguration (daemon.json)..."
     
     # Schreibt die komplette, gehärtete Docker-Konfiguration
     jq -n \
-      --arg bip "$docker_gateway_ip/$(echo "$DOCKER_IPV4_CIDR" | cut -d'/' -f2)" \
-      --arg fixed_cidr "$DOCKER_IPV4_CIDR" \
-      --arg fixed_cidr_v6 "$DOCKER_IPV6_CIDR" \
-      '{
+    --arg bip "$docker_gateway_ip/$(echo "$DOCKER_IPV4_CIDR" | cut -d'/' -f2)" \
+    --arg fixed_cidr "$DOCKER_IPV4_CIDR" \
+    --arg fixed_cidr_v6 "$DOCKER_IPV6_CIDR" \
+    '{
         "bip": $bip,
         "fixed-cidr": $fixed_cidr,
         "ipv6": true,
         "fixed-cidr-v6": $fixed_cidr_v6,
-        "log-driver": "json-file",
-        "log-opts": { "max-size": "10m", "max-file": "3" },
+        "ip6tables": true,
+        "iptables": true,
+        "log-driver": "journald",
+        "log-opts": { 
+        "tag": "{{.Name}}/{{.FullID}}"
+        },
+        "exec-opts": ["native.cgroupdriver=systemd"],
+        "storage-driver": "overlay2",
         "live-restore": true,
-        "userland-proxy": true,
-        "iptables": false,
-        "ip6tables": false
-       }' > "$daemon_json"
+        "userland-proxy": false
+    }' > "$daemon_json"
     
+    # --- NEU: systemd Drop-in für stabilen Start ---
+    log_info "  -> Erstelle systemd-Abhängigkeit: Docker muss nach nftables starten..."
+    local override_dir="/etc/systemd/system/docker.service.d"
+    mkdir -p "$override_dir"
+
+    cat > "$override_dir/dependencies.conf" <<'EOF'
+[Unit]
+# Stellt sicher, dass Docker erst startet, nachdem die Firewall aktiv ist.
+# Dies verhindert die "Race Condition" beim Systemstart und bei der Erst-Installation.
+Requires=nftables.service
+After=nftables.service
+EOF
+
+    # Konfiguration des Service-Managers neu laden, um die Änderung zu übernehmen
+    run_with_spinner "Lade systemd-Konfiguration neu..." "systemctl daemon-reload"
+    
+    # Jetzt, mit der garantierten Startreihenfolge, können wir Docker sicher starten.
     if ! run_with_spinner "Aktiviere und starte Docker-Dienst..." "systemctl enable --now docker"; then
         log_error "Docker-Dienst konnte nicht gestartet werden! Container können nicht deployt werden."
         return 1
     fi
     
-    log_ok "Docker Daemon konfiguriert und nutzt jetzt das Netzwerk: $DOCKER_IPV4_CIDR"
+    log_ok "Docker Daemon konfiguriert und startet jetzt zuverlässig nach der Firewall."
 }
 
 ##
@@ -2637,24 +2849,144 @@ module_verify_setup() {
         done
     fi
     
-    # --- Zusammenfassung ---
-    log_info "--- Status-Zusammenfassung ---"
-    if [ "$failed_critical" -gt 0 ]; then
-        log_error "KRITISCH: Das System hat ernste Probleme!"
-        log_error "  -> $failed_critical kritische(r) Service(s) laufen NICHT."
-        log_warn "  -> SSH oder Firewall sind offline - Server möglicherweise nicht erreichbar!"
-    elif [ "$failed_important" -gt 0 ]; then
-        log_warn "$failed_important wichtige(r) Service(s) haben Probleme."
-        log_warn "  -> Das System ist grundsätzlich funktional, aber die Sicherheit ist eingeschränkt."
-        log_ok "Alle kritischen Services laufen."
+    # ═══════════════════════════════════════════════════════════════════════════
+    # ✅ NEUER BLOCK: sudo-Berechtigungen Audit
+    # ═══════════════════════════════════════════════════════════════════════════
+    log_info "  -> Prüfe sudo-Berechtigungen und Sicherheit..."
+    
+    # Führe das Audit durch und capture eventuelle Fehler
+    if audit_sudo_permissions >/dev/null 2>&1; then
+        log_ok "sudo-System ist korrekt konfiguriert."
     else
-        log_ok "Alle kritischen und wichtigen Services laufen perfekt."
+        log_warn "sudo-System hat möglicherweise Probleme."
+        ((failed_important++))
+    fi
+    
+    # Spezielle Prüfung: Sind noch temporäre NOPASSWD-Rechte aktiv?
+    local temp_sudo_files=()
+    while IFS= read -r -d '' file; do
+        temp_sudo_files+=("$file")
+    done < <(find /etc/sudoers.d/ -name "*temp*" -o -name "99-*" -type f -print0 2>/dev/null)
+    
+    if [ ${#temp_sudo_files[@]} -gt 0 ]; then
+        log_warn "Temporäre sudo-Dateien noch vorhanden:"
+        for file in "${temp_sudo_files[@]}"; do
+            if grep -q "NOPASSWD" "$file" 2>/dev/null; then
+                log_warn "  ⚠️ $(basename "$file") - enthält NOPASSWD"
+                ((failed_important++))
+            else
+                log_info "  ✅ $(basename "$file") - OK"
+            fi
+        done
+    else
+        log_ok "Keine temporären sudo-Dateien gefunden."
+    fi
+    
+    # Prüfe, ob ADMIN_USER korrekte sudo-Rechte hat (MIT Passwort)
+    if [ -n "${ADMIN_USER:-}" ]; then
+        if [ -f "/etc/sudoers.d/50-$ADMIN_USER" ]; then
+            if grep -q "NOPASSWD" "/etc/sudoers.d/50-$ADMIN_USER" 2>/dev/null; then
+                log_error "SICHERHEITSPROBLEM: '$ADMIN_USER' hat noch NOPASSWD-Rechte!"
+                ((failed_critical++))
+            else
+                log_ok "'$ADMIN_USER' hat korrekte sudo-Rechte (mit Passwort-Abfrage)."
+            fi
+        else
+            log_warn "'$ADMIN_USER' hat keine explizite sudo-Regel (nur Gruppenmitgliedschaft)."
+        fi
+    fi
+    
+    # ═══════════════════════════════════════════════════════════════════════════
+    # ✅ NEUER BLOCK: Netzwerk & Firewall Verifikation
+    # ═══════════════════════════════════════════════════════════════════════════
+    log_info "  -> Prüfe Netzwerk-Konfiguration..."
+    
+    # SSH-Port Erreichbarkeit
+    local ssh_port="${SSH_PORT:-22}"
+    if ss -tln | grep -q ":$ssh_port "; then
+        log_ok "SSH-Port $ssh_port ist gebunden."
+    else
+        log_error "SSH-Port $ssh_port ist NICHT erreichbar!"
+        ((failed_critical++))
+    fi
+    
+    # NFTables-Regeln
+    local nft_rules_count
+    nft_rules_count=$(nft list ruleset 2>/dev/null | grep -c "^[[:space:]]*[^#]" || echo "0")
+    if [ "$nft_rules_count" -gt 10 ]; then
+        log_ok "NFTables-Firewall hat $nft_rules_count aktive Regeln."
+    else
+        log_warn "NFTables-Firewall hat nur $nft_rules_count Regeln (möglicherweise unvollständig)."
+        ((failed_important++))
+    fi
+    
+    # Docker-spezifische Prüfungen
+    if [ "$SERVER_ROLE" = "1" ] && systemctl is-active --quiet docker; then
+        # Docker-Netzwerk prüfen
+        if ip link show docker0 >/dev/null 2>&1; then
+            local docker_subnet
+            docker_subnet=$(docker network inspect bridge --format '{{range .IPAM.Config}}{{.Subnet}}{{end}}' 2>/dev/null || echo "unbekannt")
+            log_ok "Docker-Bridge aktiv (Subnet: $docker_subnet)."
+        else
+            log_warn "Docker-Bridge 'docker0' nicht gefunden."
+            ((failed_important++))
+        fi
+    fi
+    
+    # Tailscale-spezifische Prüfungen
+    if command -v tailscale >/dev/null 2>&1 && [ "${ACCESS_MODEL:-}" = "1" ]; then
+        if tailscale status >/dev/null 2>&1 && ! tailscale status | grep -q "Logged out"; then
+            local tailscale_ip
+            tailscale_ip=$(tailscale ip -4 2>/dev/null || echo "keine IPv4")
+            log_ok "Tailscale VPN verbunden (IP: $tailscale_ip)."
+        else
+            log_warn "Tailscale VPN nicht verbunden oder nicht authentifiziert."
+            ((failed_important++))
+        fi
+    fi
+    
+    # ═══════════════════════════════════════════════════════════════════════════
+    # ZUSAMMENFASSUNG & BEWERTUNG
+    # ═══════════════════════════════════════════════════════════════════════════
+    log_info "--- Verifikations-Zusammenfassung ---"
+    
+    if [ "$failed_critical" -gt 0 ]; then
+        log_error "🚨 KRITISCHE PROBLEME: $failed_critical"
+        log_error "Das System hat ernste Probleme und ist möglicherweise nicht funktionsfähig!"
+        if [ "$failed_critical" -ge 2 ]; then
+            log_error "  -> SSH oder Firewall sind offline - Server möglicherweise nicht erreichbar!"
+            log_error "  -> NOTFALL-ZUGANG über VPS-Console/Rescue-Mode verwenden!"
+        fi
+    elif [ "$failed_important" -gt 0 ]; then
+        log_warn "⚠️ WICHTIGE PROBLEME: $failed_important"
+        log_warn "Das System ist grundsätzlich funktional, aber die Sicherheit oder Funktion ist eingeschränkt."
+        log_ok "✅ Alle kritischen Services laufen."
+    else
+        log_ok "🎉 PERFEKT: Alle kritischen und wichtigen Services laufen einwandfrei."
     fi
 
     if [ "$failed_optional" -gt 0 ]; then
-        log_info "$failed_optional optionale(r) Service(s) sind inaktiv (nicht kritisch)."
+        log_info "ℹ️ OPTIONALE PROBLEME: $failed_optional (nicht kritisch für den Betrieb)"
+    else
+        log_ok "✅ Auch alle optionalen Services sind aktiv."
     fi
-    log_info "------------------------------"
+    
+    # Gesamtbewertung
+    local total_issues=$((failed_critical + failed_important))
+    if [ "$total_issues" -eq 0 ]; then
+        log_ok "🏆 SYSTEM-STATUS: EXZELLENT - Bereit für den Produktivbetrieb!"
+    elif [ "$total_issues" -le 2 ]; then
+        log_warn "📊 SYSTEM-STATUS: GUT - Kleinere Probleme sollten behoben werden."
+    elif [ "$total_issues" -le 5 ]; then
+        log_warn "📊 SYSTEM-STATUS: AKZEPTABEL - Mehrere Probleme erfordern Aufmerksamkeit."
+    else
+        log_error "📊 SYSTEM-STATUS: PROBLEMATISCH - Umfassende Fehlerbehandlung erforderlich!"
+    fi
+    
+    log_info "-------------------------------------"
+    
+    # Return Code für weitere Verarbeitung
+    return $total_issues
 }
 
 
