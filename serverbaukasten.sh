@@ -27,7 +27,7 @@
 set -e
 set -o pipefail
 
-readonly SCRIPT_VERSION="4.0"
+readonly SCRIPT_VERSION="4.0.1"
 readonly CROWDSEC_MAXRETRY_DEFAULT=5
 readonly CROWDSEC_BANTIME_DEFAULT="48h" 
 readonly SSH_PORT_DEFAULT=22
@@ -1595,9 +1595,6 @@ EOF
 ##
 # Haupt-Einstiegspunkt des Skripts. Verarbeitet Argumente und startet das Setup.
 ##
-##
-# Haupt-Einstiegspunkt des Skripts. Verarbeitet Argumente und startet das Setup.
-##
 main() {
     check_root
 
@@ -1617,11 +1614,20 @@ main() {
             :) log_error "Option -$OPTARG benötigt ein Argument."; show_usage; exit 1;;
         esac
     done
+    
 
-    # PRÜFUNG: Config-Datei ist jetzt Pflicht!
+    # --- KRITISCHE VORAB-PRÜFUNG: Konfigurationsdatei ---
+    # 1. Prüfen, ob der Parameter -c überhaupt gesetzt wurde.
     if [ -z "$CONFIG_FILE" ]; then
-        log_error "Keine Konfigurationsdatei angegeben."
+        log_error "Fehler: Keine Konfigurationsdatei mit '-c' angegeben."
         show_usage
+        exit 1
+    fi
+
+    # 2. Prüfen, ob die angegebene Datei existiert und lesbar ist.
+    #    Dies geschieht VOR jeder anderen Aktion.
+    if [ ! -r "$CONFIG_FILE" ]; then
+        log_error "Fehler: Konfigurationsdatei nicht gefunden oder nicht lesbar: $CONFIG_FILE"
         exit 1
     fi
 
@@ -1663,8 +1669,9 @@ run_setup() {
     # --- Phase 1: Vorbereitung ---
     log_info "Phase 1/5: Vorbereitung..."
     pre_flight_checks
+    load_config_from_file "$CONFIG_FILE" 
     module_cleanup
-    load_config_from_file "$CONFIG_FILE"
+
 
     # --- Phase 2: System-Fundament ---
     log_info "Phase 2/5: System-Fundament (OS, Pakete, Kernel)..."
