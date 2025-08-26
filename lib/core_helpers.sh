@@ -106,17 +106,6 @@ run_with_spinner() {
 }
 
 ##
-## Prüft, ob das Skript als root ausgeführt wird. Bricht ab, wenn nicht.
-## @return int 0=Erfolg, 1=Fehler
-##
-check_root() {
-    if [ "$EUID" -ne 0 ]; then
-        log_error "Dieses Skript muss als 'root' ausgeführt werden."
-        exit 1
-    fi
-}
-
-##
 ## Erkennt das Betriebssystem und die Version aus /etc/os-release.
 ## Setzt die globalen Variablen OS_ID und OS_VERSION_CODENAME.
 ## Bricht mit einem Fehler ab, wenn die Datei nicht gefunden wird.

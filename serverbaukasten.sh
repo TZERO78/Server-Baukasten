@@ -22,75 +22,116 @@
 ################################################################################
 
 # --- Sicherheits-Präambel ---
-# Stellt sicher, dass das Skript bei Fehlern sofort abbricht (set -e)
-# und Fehler in einer Pipe-Kette weitergegeben werden (set -o pipefail).
 set -e
 set -o pipefail
-
-readonly SCRIPT_VERSION="4.0.1"
-readonly CROWDSEC_MAXRETRY_DEFAULT=5
-readonly CROWDSEC_BANTIME_DEFAULT="48h" 
-readonly SSH_PORT_DEFAULT=22
-readonly NOTIFICATION_EMAIL_DEFAULT="admin@example.com"  # Generic für Community
-readonly COMPONENTS_BASE_URL="https://raw.githubusercontent.com/TZERO78/Server-Baukasten/main/components"
-readonly CONF_BASE_URL="https://raw.githubusercontent.com/TZERO78/Server-Baukasten/main/conf"
-
-# Globale Verbose/Debug-Variablen
-declare -g SCRIPT_VERBOSE=false
-declare -g DEBUG=false
-declare -g TEST_MODE=false
 
 # --- Einfache Log-Funktionen für die Initialisierungsphase ---
 # Diese werden später von core_helpers.sh überschrieben.
 log_info() { echo -e "\033[0;36mℹ️  $*\033[0m"; }
 log_ok() { echo -e "\033[0;32m✅ $*\033[0m"; }
+log_warn() { echo -e "\033[1;33m⚠️  $*\033[0m"; }
 log_error() { echo -e "\033[0;31m❌ $*\033[0m" >&2; exit 1; }
 
-# Globale Variablen für den Skript-Zustand
-declare -a BACKUP_FILES
-CONFIG_FILE=""
-
 ##
-##  Läd alle Bibliotheken aus dem './lib'-Verzeichnis.
-##  Diese Bibliotheken enthalten Funktionen für Logging, UI, Validierung,
-##  Konfigurationsmanagement und die einzelnen Setup-Module.
-##  Jede Bibliothek sollte eigene log_* Aufrufe für Feedback enthalten.
+# Prüft, ob das Skript als root ausgeführt wird.
 ##
-load_libary() {
-    log_info "Lade alle Helfer-Bibliotheken aus dem './lib'-Verzeichnis..."
-    for file in ./lib/*.sh; do
-        if [ -f "$file" ]; then
-            source "$file"
-            log_ok "  -> '$file' geladen."
-        fi
-    done
-    log_ok "Alle Helfer-Bibliotheken wurden geladen."
+check_root() {
+    if [ "$EUID" -ne 0 ]; then
+        log_error "Dieses Skript muss als 'root' ausgeführt werden."
+        exit 1
+    fi
 }
 
+##
+# Lädt alle Helfer-Bibliotheken aus dem konfigurierten Verzeichnis.
+##
+load_libraries() {
+    local lib_dir="./lib"
+    log_info "📚 Lade Helfer-Bibliotheken aus '$lib_dir'..."
+    
+    local count=0
+    local failed=0
+    
+    if [ ! -d "$lib_dir" ]; then
+        log_warn "Verzeichnis '$lib_dir' nicht gefunden - überspringe Bibliotheken."
+        return 0
+    fi
+    
+    for file in "$lib_dir"/*.sh; do
+        [ ! -f "$file" ] && continue
+        
+        if source "$file" 2>/dev/null; then
+            log_ok "  -> '$(basename "$file")' geladen"
+            ((count++))
+        else
+            log_error "  -> '$(basename "$file")' FEHLER beim Laden!"
+            ((failed++))
+        fi
+    done
+    
+    if [ $failed -gt 0 ]; then
+        log_error "$failed Bibliothek(en) konnten nicht geladen werden!"
+        exit 1
+    fi
+    
+    log_ok "$count Helfer-Bibliotheken erfolgreich geladen."
+}
 
-
+##
+# Lädt alle Setup-Module aus dem konfigurierten Verzeichnis.
+##
+load_modules() {
+    # Jetzt können wir die Konstanten verwenden!
+    log_info "🔧 Lade Setup-Module aus '$MODULES_DIR'..."
+    
+    local count=0
+    local failed=0
+    
+    if [ ! -d "$MODULES_DIR" ]; then
+        log_warn "Verzeichnis '$MODULES_DIR' nicht gefunden - überspringe Module."
+        return 0
+    fi
+    
+    for file in "$MODULES_DIR"/*.sh; do
+        [ ! -f "$file" ] && continue
+        
+        if source "$file" 2>/dev/null; then
+            log_ok "  -> '$(basename "$file")' geladen"
+            ((count++))
+        else
+            log_error "  -> '$(basename "$file")' FEHLER beim Laden!"
+            ((failed++))
+        fi
+    done
+    
+    if [ $failed -gt 0 ]; then
+        log_error "$failed Modul(e) konnten nicht geladen werden!"
+        exit 1
+    fi
+    
+    log_ok "$count Setup-Module erfolgreich geladen."
+}
 
 ################################################################################
-#
 #                                 HAUPTLOGIK
-#
 ################################################################################
 
 ##
-# Haupt-Einstiegspunkt des Skripts. Verarbeitet Argumente und startet das Setup.
+# Haupt-Einstiegspunkt des Skripts.
 ##
 main() {
     check_root
-
-    # --- Argumente verarbeiten ---
-    local TEST_MODE=false
-    CONFIG_FILE=""
     
-    # KORRIGIERT: -t für Test-Modus hinzugefügt
+    load_libraries  # Lädt constants.sh automatisch mit!
+    load_modules   
+    
+    # --- Argumente verarbeiten ---
+    local local_test_mode=false
+    
     while getopts ":c:thvd" opt; do
         case ${opt} in
             c) CONFIG_FILE=$OPTARG;;
-            t) TEST_MODE=true;; # <-- DIESE ZEILE HAT GEFEHLT
+            t) local_test_mode=true;;
             h) show_usage; exit 0;;
             v) SCRIPT_VERBOSE=true;;
             d) DEBUG=true; SCRIPT_VERBOSE=true;;
@@ -99,41 +140,34 @@ main() {
         esac
     done
     
-
-    # --- KRITISCHE VORAB-PRÜFUNG: Konfigurationsdatei ---
-    # 1. Prüfen, ob der Parameter -c überhaupt gesetzt wurde.
+    # Setze globale TEST_MODE Variable
+    TEST_MODE=$local_test_mode
+    
+    # --- Konfigurationsdatei-Prüfung ---
     if [ -z "$CONFIG_FILE" ]; then
         log_error "Fehler: Keine Konfigurationsdatei mit '-c' angegeben."
         show_usage
         exit 1
     fi
 
-    # 2. Prüfen, ob die angegebene Datei existiert und lesbar ist.
-    #    Dies geschieht VOR jeder anderen Aktion.
     if [ ! -r "$CONFIG_FILE" ]; then
         log_error "Fehler: Konfigurationsdatei nicht gefunden oder nicht lesbar: $CONFIG_FILE"
         exit 1
     fi
 
-    export SCRIPT_VERBOSE DEBUG
+    export SCRIPT_VERBOSE DEBUG TEST_MODE
     trap 'rollback' ERR
 
-    log_info "🚀 Starte Server-Baukasten v$SCRIPT_VERSION..."
+    log_info "🚀 Starte $SCRIPT_NAME v$SCRIPT_VERSION..."
     if [ "$TEST_MODE" = true ]; then
         log_warn "TEST-MODUS ist aktiviert. Zeitaufwändige Operationen werden übersprungen."
     fi
-    if [ -n "$CONFIG_FILE" ]; then
-        log_info "Verwende Konfigurationsdatei: $CONFIG_FILE"
-    fi
+    log_info "Verwende Konfigurationsdatei: $CONFIG_FILE"
 
     run_setup "$TEST_MODE"
     
-    # Fehlerfalle nach erfolgreichem Setup deaktivieren
     trap - ERR
-    
-    # Sicherheits-Cleanup VOR der Zusammenfassung
     cleanup_sensitive_data "$TEST_MODE"
-
     show_summary
     
     if [ "$TEST_MODE" = true ]; then
@@ -144,42 +178,33 @@ main() {
 }
 
 ##
-# Führt die einzelnen Setup-Module in einer logisch korrekten Reihenfolge aus.
-# @param bool $1 Test-Modus (true/false).
+# Führt die Setup-Module in der korrekten Reihenfolge aus.
 ##
 run_setup() {
     local TEST_MODE="$1"
     
-    # --- Phase 1: Vorbereitung ---
     log_info "Phase 1/5: Vorbereitung..."
     pre_flight_checks
     load_config_from_file "$CONFIG_FILE" 
     module_cleanup
 
-
-    # --- Phase 2: System-Fundament ---
     log_info "Phase 2/5: System-Fundament (OS, Pakete, Kernel)..."
     detect_os
     module_fix_apt_sources
     module_base
     module_system_update "$TEST_MODE"
-    # WICHTIG: Kernel-Härtung VOR den Diensten, die davon abhängen (z.B. IP-Forwarding für Docker)
     module_kernel_hardening
 
-   # --- Phase 3: Sicherheits-Architektur ---
     log_info "Phase 3/5: Sicherheits-Architektur (Firewall, IPS, Monitoring)..."
     module_security "$TEST_MODE"
     
-
-    # --- Phase 4: Kern-Dienste (Netzwerk & Container) ---
     log_info "Phase 4/5: Kern-Dienste (Netzwerk & Container)..."
     module_network "$TEST_MODE" 
     if [ "$SERVER_ROLE" = "1" ]; then
-        module_container # Docker Daemon
-        module_deploy_containers # Portainer, Watchtower
+        module_container
+        module_deploy_containers
     fi
  
-    # --- Phase 5: Abschluss-Arbeiten ---
     log_info "Phase 5/5: Abschluss-Arbeiten (Mail, Logs, Backup, Verifikation)..."
     module_mail_setup
     module_journald_optimization
