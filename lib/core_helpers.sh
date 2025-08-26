@@ -179,6 +179,50 @@ pre_flight_checks() {
 }
 
 ##
+# Erkennt den aktuellen Systemzustand (Netzwerk-Interfaces, aktive Dienste wie Docker/Tailscale).
+# @return string Ein String mit erkannten Werten zur Verwendung mit 'source'.
+##
+detect_system_state() {
+    local primary_interface=""
+    if command -v ip &>/dev/null; then
+        primary_interface=$(ip route get 8.8.8.8 2>/dev/null | grep -oP 'dev \K\S+' | head -n1)
+    fi
+    if [ -z "$primary_interface" ]; then
+        primary_interface=$(ip route show default 2>/dev/null | awk '{print $5}' | head -n1)
+    fi
+    if [ -z "$primary_interface" ]; then
+        primary_interface=$(ls /sys/class/net/ | grep -E '^(eth|ens|enp)' | head -n1)
+    fi
+    
+    local docker_active="false"
+    local docker_interface_exists="false"
+    if systemctl is-active --quiet docker && command -v docker &>/dev/null; then
+        docker_active="true"
+        if ip link show docker0 &>/dev/null; then
+            docker_interface_exists="true"
+        fi
+    fi
+    
+    local tailscale_active="false"
+    local tailscale_interface=""
+    if command -v tailscale &>/dev/null && tailscale status &>/dev/null; then
+        tailscale_active="true"
+        tailscale_interface=$(ip link show | grep -E '^[0-9]+: tailscale[0-9]*:' | head -n1 | cut -d: -f2 | tr -d ' ')
+        if [ -z "$tailscale_interface" ]; then
+            tailscale_interface="tailscale0"
+        fi
+    fi
+    
+    cat <<EOF
+PRIMARY_INTERFACE="$primary_interface"
+DOCKER_ACTIVE="$docker_active"
+DOCKER_INTERFACE_EXISTS="$docker_interface_exists"
+TAILSCALE_ACTIVE="$tailscale_active"
+TAILSCALE_INTERFACE="$tailscale_interface"
+EOF
+}
+
+##
 # Erstellt ein Backup einer Datei, falls noch keins existiert, und registriert sie für ein Rollback.
 # @param string $1 Der Pfad zur Datei.
 ##
