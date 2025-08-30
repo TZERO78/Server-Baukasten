@@ -134,28 +134,36 @@ module_base() {
         log_info "  -> 6/7: Docker-Setup übersprungen (Einfacher Server)."
     fi
 
-    # --- Phase 7/7: Modulare Komponenten bereitstellen ---
-    log_info "  -> 7/7: Stelle benötigte modulare Komponenten bereit..."
-    
-    # GeoIP-Komponenten (falls aktiviert)
+    # GeoIP-Komponenten prüfen (falls aktiviert)
     if [ "${ENABLE_GEOIP_BLOCKING:-nein}" = "ja" ]; then
-        log_info "     -> GeoIP-Komponenten..."
+        log_info "     -> Prüfe GeoIP-Management-Tools..."
         
-        # geoip-manager installieren
-        if run_with_spinner "Download geoip-manager..." "curl -fsSL '$COMPONENTS_BASE_URL/geoip-manager' -o '/usr/local/bin/geoip-manager'"; then
-            chmod 750 "/usr/local/bin/geoip-manager"
-            chown root:sudo "/usr/local/bin/geoip-manager"
-        else
-            log_error "geoip-manager Download fehlgeschlagen!"
+        # Prüfe ob die Tools vorhanden sind
+        local missing_tools=()
+        
+        if [ ! -x "/usr/local/bin/geoip-manager" ] && [ ! -f "./components/geoip-manager" ]; then
+            missing_tools+=("geoip-manager")
         fi
         
-        # update-geoip-sets installieren
-        if run_with_spinner "Download update-geoip-sets..." "curl -fsSL '$COMPONENTS_BASE_URL/update-geoip-sets' -o '/usr/local/bin/update-geoip-sets'"; then
-            chmod 750 "/usr/local/bin/update-geoip-sets"
-            chown root:sudo "/usr/local/bin/update-geoip-sets"
-        else
-            log_error "update-geoip-sets Download fehlgeschlagen!"
+        if [ ! -x "/usr/local/bin/update-geoip-sets" ] && [ ! -f "./components/update-geoip-sets" ]; then
+            missing_tools+=("update-geoip-sets")
         fi
+        
+        if [ ${#missing_tools[@]} -gt 0 ]; then
+            log_error "Fehlende GeoIP-Tools: ${missing_tools[*]}"
+            log_error "Diese sollten durch das install.sh bereits vorhanden sein!"
+            exit 1
+        fi
+        
+        # Kopiere lokale Components nach /usr/local/bin (falls nicht bereits dort)
+        for tool in "geoip-manager" "update-geoip-sets"; do
+            if [ -f "./components/$tool" ] && [ ! -x "/usr/local/bin/$tool" ]; then
+                cp "./components/$tool" "/usr/local/bin/"
+                chmod 750 "/usr/local/bin/$tool"
+                chown root:sudo "/usr/local/bin/$tool"
+                log_ok "     ✅ $tool nach /usr/local/bin/ installiert"
+            fi
+        done
     fi
     
     # Weitere Komponenten direkt hier hinzufügen:
