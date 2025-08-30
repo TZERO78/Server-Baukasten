@@ -51,18 +51,6 @@ readonly CONFIG_DIR="/etc/server-baukasten"
 # ═══════════════════════════════════════════════════════════════════════════
 readonly SUPPORTED_OS=("debian:12" "ubuntu:22.04" "ubuntu:24.04")
 
-# ═══════════════════════════════════════════════════════════════════════════
-# GLOBALE SCRIPT-VARIABLEN
-# ═══════════════════════════════════════════════════════════════════════════
-
-# Script-Modi und -Zustand
-declare -g SCRIPT_VERBOSE=false
-declare -g DEBUG=false
-declare -g TEST_MODE=false
-
-# Globale Variablen für den Skript-Zustand
-declare -g CONFIG_FILE=""
-declare -a BACKUP_FILES
 
 # ═══════════════════════════════════════════════════════════════════════════
 # HILFSFUNKTIONEN
