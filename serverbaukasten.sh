@@ -863,33 +863,62 @@ download_and_process_template() {
 
 ##
 # Stellt iptables auf nft-Backend um und sichert den nftables-Dienst ab.
+# Lädt auch alle benötigten Kernel-Module für NAT und Masquerading.
 ##
 setup_iptables_nft_backend() {
-    log_info "🔗 Stelle iptables auf NFT-Backend um..."
+    log_info "🔗 Installiere und konfiguriere iptables-nft Backend..."
     
-    # IPv4 + IPv6 iptables auf NFT umstellen
+    # --- 0. Installation sicherstellen ---
+    run_with_spinner "Installiere iptables-Pakete..." \
+        "apt-get install -y iptables ip6tables netfilter-persistent iptables-persistent"
+    
+    # --- 1. Kernel-Module laden ---
+    log_info "  -> Lade benötigte Kernel-Module für NAT und Masquerading..."
+    
+    local modules=("nf_nat" "ip6table_nat" "ip6t_MASQUERADE" "nft_masq" "nft_nat")
+    for module in "${modules[@]}"; do
+        if ! lsmod | grep -q "^$module"; then
+            if modprobe "$module" 2>/dev/null; then
+                log_ok "Kernel-Modul '$module' geladen."
+            else
+                log_debug "Kernel-Modul '$module' nicht verfügbar oder bereits integriert."
+            fi
+        else
+            log_debug "Kernel-Modul '$module' bereits geladen."
+        fi
+    done
+    
+    # --- 2. Module beim Boot laden ---
+    log_info "  -> Konfiguriere automatisches Laden der Module beim Boot..."
+    cat > /etc/modules-load.d/nftables-nat.conf <<'EOF'
+# NFTables NAT-Module für IPv4 und IPv6 Masquerading
+nf_nat
+ip6table_nat  
+ip6t_MASQUERADE
+nft_masq
+nft_nat
+EOF
+    
+    # --- 3. IPv4 + IPv6 iptables auf NFT umstellen ---
     run_with_spinner "Konfiguriere iptables-nft..." \
         "update-alternatives --set iptables /usr/sbin/iptables-nft && \
          update-alternatives --set ip6tables /usr/sbin/ip6tables-nft"
     
-    # Kurze Verifikation
+    # --- 4. Verifikation ---
     if iptables --version 2>/dev/null | grep -q "nf_tables"; then
         log_ok "iptables nutzt jetzt nf_tables-Backend"
     else
         log_warn "iptables-nft Verifikation fehlgeschlagen"
     fi
 
-    # --- NEU: systemd Drop-in für nftables.service ---
-    log_info "🛡️  Sichere den nftables-Dienst gegen unbeabsichtigtes Leeren ab..."
+    # --- 5. systemd Drop-in für nftables.service ---
+    log_info "  -> Sichere den nftables-Dienst gegen unbeabsichtigtes Leeren ab..."
     
     local override_dir="/etc/systemd/system/nftables.service.d"
     local override_file="$override_dir/override.conf"
 
-    # Verzeichnis erstellen
     mkdir -p "$override_dir"
 
-    # Drop-in-Datei schreiben. Verhindert, dass 'systemctl stop nftables' die Regeln löscht.
-    # Dies ist ein wichtiges Sicherheitsmerkmal, besonders in Produktionsumgebungen.
     cat > "$override_file" <<'EOF'
 [Service]
 # Standard ExecStop neutralisieren, um das Leeren der Regeln zu verhindern
@@ -900,8 +929,6 @@ ExecReload=/usr/sbin/nft -f /etc/nftables.conf
 EOF
 
     log_ok "systemd Drop-in-Datei '$override_file' erstellt."
-
-    # systemd neu laden, um die Änderung zu übernehmen
     run_with_spinner "Lade systemd-Konfiguration neu..." "systemctl daemon-reload"
 }
 
