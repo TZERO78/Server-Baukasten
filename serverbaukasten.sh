@@ -25,12 +25,27 @@
 set -e
 set -o pipefail
 
+# ═══════════════════════════════════════════════════════════════════════════
+# GLOBALE SCRIPT-VARIABLEN & ZUSTÄNDE
+# ═══════════════════════════════════════════════════════════════════════════
+declare -g SCRIPT_VERBOSE=false
+declare -g DEBUG=false
+declare -g TEST_MODE=false
+declare -g CONFIG_FILE=""
+declare -a BACKUP_FILES
+
 # --- Einfache Log-Funktionen für die Initialisierungsphase ---
 # Diese werden später von core_helpers.sh überschrieben.
 log_info() { echo -e "\033[0;36mℹ️  $*\033[0m"; }
 log_ok() { echo -e "\033[0;32m✅ $*\033[0m"; }
 log_warn() { echo -e "\033[1;33m⚠️  $*\033[0m"; }
 log_error() { echo -e "\033[0;31m❌ $*\033[0m" >&2; exit 1; }
+log_debug() {
+    # Mache nichts, wenn der DEBUG-Modus nicht aktiv ist
+    [ "${DEBUG:-false}" = "true" ] || return 0
+    # Gib die Debug-Nachricht (nach stderr) aus, um die normale Ausgabe nicht zu stören
+    echo -e "\033[0;90m⚙️  [DEBUG] $*\033[0m" >&2
+}
 
 ##
 # Prüft, ob das Skript als root ausgeführt wird.
@@ -43,73 +58,82 @@ check_root() {
 }
 
 ##
-# Lädt alle Helfer-Bibliotheken aus dem konfigurierten Verzeichnis.
+# Lädt alle Helfer-Bibliotheken aus dem ./lib Verzeichnis.
+# Bricht bei ersten Fehler sofort ab.
 ##
 load_libraries() {
     local lib_dir="./lib"
-    log_info "📚 Lade Helfer-Bibliotheken aus '$lib_dir'..."
-    
-    local count=0
-    local failed=0
-    
-    if [ ! -d "$lib_dir" ]; then
-        log_warn "Verzeichnis '$lib_dir' nicht gefunden - überspringe Bibliotheken."
-        return 0
-    fi
-    
-    for file in "$lib_dir"/*.sh; do
-        [ ! -f "$file" ] && continue
-        
-        if source "$file" 2>/dev/null; then
-            log_ok "  -> '$(basename "$file")' geladen"
-            ((count++))
-        else
-            log_error "  -> '$(basename "$file")' FEHLER beim Laden!"
-            ((failed++))
-        fi
-    done
-    
-    if [ $failed -gt 0 ]; then
-        log_error "$failed Bibliothek(en) konnten nicht geladen werden!"
-        exit 1
-    fi
-    
-    log_ok "$count Helfer-Bibliotheken erfolgreich geladen."
-}
+    log_info "📚 Lade Helfer-Bibliotheken..."
 
+    if [ ! -d "$lib_dir" ]; then
+        log_error "Bibliotheks-Verzeichnis '$lib_dir' nicht gefunden. Abbruch."
+        return 1
+    fi
+
+    local lib_files=("$lib_dir"/*.sh)
+    local total_files=${#lib_files[@]}
+    
+    log_debug "Gefunden: $total_files Bibliotheksdateien."
+
+    local file_count=0
+    for lib_file in "${lib_files[@]}"; do
+        [ -f "$lib_file" ] || continue
+
+        local filename
+        filename=$(basename "$lib_file")
+
+        if ! source "$lib_file"; then
+            log_error "Kritischer Fehler beim Laden der Bibliothek '$filename'. Abbruch."
+            return 1
+        fi
+    
+        log_debug "✅ '$filename' erfolgreich geladen."
+        
+        # GEÄNDERT: Zähler "klassisch" mit 'let' hochzählen
+        let file_count=file_count+1
+        
+        log_debug "Fortschritt: $file_count / $total_files"
+    done
+
+    log_info "🎉 $file_count Bibliotheken erfolgreich geladen."
+}
 ##
-# Lädt alle Setup-Module aus dem konfigurierten Verzeichnis.
+# Lädt alle Setup-Module aus dem ./modules Verzeichnis.
+# Bricht bei ersten Fehler sofort ab.
 ##
 load_modules() {
-    # Jetzt können wir die Konstanten verwenden!
-    log_info "🔧 Lade Setup-Module aus '$MODULES_DIR'..."
-    
-    local count=0
-    local failed=0
-    
+    log_info "🔧 Lade Setup-Module..."
+
+    # Die Konstante MODULES_DIR wird in constants.sh definiert
     if [ ! -d "$MODULES_DIR" ]; then
-        log_warn "Verzeichnis '$MODULES_DIR' nicht gefunden - überspringe Module."
-        return 0
+        log_warn "Module-Verzeichnis '$MODULES_DIR' nicht gefunden - überspringe."
+        return 0 # Das ist kein kritischer Fehler
     fi
-    
-    for file in "$MODULES_DIR"/*.sh; do
-        [ ! -f "$file" ] && continue
-        
-        if source "$file" 2>/dev/null; then
-            log_ok "  -> '$(basename "$file")' geladen"
-            ((count++))
-        else
-            log_error "  -> '$(basename "$file")' FEHLER beim Laden!"
-            ((failed++))
+
+    local module_files=("$MODULES_DIR"/*.sh)
+    local total_files=${#module_files[@]}
+    log_debug "Gefunden: $total_files Setup-Module."
+
+    local count=0
+    for module_file in "${module_files[@]}"; do
+        [ -f "$module_file" ] || continue
+
+        local filename
+        filename=$(basename "$module_file")
+
+        # Robuste Fehlerbehandlung: Kein Verstecken von Fehlern mehr
+        if ! source "$module_file"; then
+            log_error "Kritischer Fehler beim Laden des Moduls '$filename'. Abbruch."
+            return 1 # Signalisiert einen Fehler -> set -e greift
         fi
+
+        log_debug "✅ Modul '$filename' erfolgreich geladen."
+        
+        # Der "klassische" Zähler, der bei dir zuverlässig funktioniert
+        let count=count+1
     done
-    
-    if [ $failed -gt 0 ]; then
-        log_error "$failed Modul(e) konnten nicht geladen werden!"
-        exit 1
-    fi
-    
-    log_ok "$count Setup-Module erfolgreich geladen."
+
+    log_ok "🎉 $count Setup-Module erfolgreich geladen."
 }
 
 ################################################################################
@@ -122,8 +146,7 @@ load_modules() {
 main() {
     check_root
     
-    load_libraries  # Lädt constants.sh automatisch mit!
-    load_modules   
+
     
     # --- Argumente verarbeiten ---
     local local_test_mode=false
@@ -139,7 +162,7 @@ main() {
             :) log_error "Option -$OPTARG benötigt ein Argument."; show_usage; exit 1;;
         esac
     done
-    
+       
     # Setze globale TEST_MODE Variable
     TEST_MODE=$local_test_mode
     
@@ -163,6 +186,9 @@ main() {
         log_warn "TEST-MODUS ist aktiviert. Zeitaufwändige Operationen werden übersprungen."
     fi
     log_info "Verwende Konfigurationsdatei: $CONFIG_FILE"
+
+    load_libraries  # Lädt constants.sh automatisch mit!
+    load_modules  
 
     run_setup "$TEST_MODE"
     
