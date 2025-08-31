@@ -757,7 +757,7 @@ EOF
 
 ##
 # Aktiviert Tailscale-Regeln dynamisch (wird vom Netzwerk-Modul aufgerufen)
-# KORRIGIERT: Erweitert bestehende Chains statt neue zu erstellen
+# KORRIGIERT: Verwendet korrekte modulare NFTables-Syntax
 ##
 activate_tailscale_rules() {
     local tailscale_interface="$1"
@@ -773,28 +773,37 @@ activate_tailscale_rules() {
     export TAILSCALE_INTERFACE="$tailscale_interface"
     export TAILSCALE_ACTIVE="true"
     
-    # Erstelle 30-tailscale.conf mit ERWEITERTEN Regeln (nicht neuen Tabellen!)
+    # Erstelle 30-tailscale.conf mit korrekter modularer Struktur
     local rules_file="/etc/nftables.d/30-tailscale.conf"
     cat > "$rules_file" <<EOF
 # =============================================================================
-# TAILSCALE-VPN REGELN (dynamisch hinzugefügt) - v4.3
+# TAILSCALE-VPN REGELN (dynamisch hinzugefügt) - v4.4
 # =============================================================================
 # Diese Regeln werden NACH der Tailscale-Installation dynamisch hinzugefügt
-# 
+#
 # Interface: $tailscale_interface
 # Status: Aktiviert am $(date)
 # =============================================================================
 
-# ERWEITERE die bestehende input-Chain um VPN-Zugang
-insert rule inet filter input position 0 iifname "$tailscale_interface" accept comment "VPN-Input: Tailscale"
-
-# ERWEITERE die bestehende forward-Chain um VPN-Forwarding  
-insert rule inet filter forward position 0 iifname "$tailscale_interface" accept comment "VPN-Forward: Von Tailscale"
-insert rule inet filter forward position 1 oifname "$tailscale_interface" ct state related,established accept comment "VPN-Forward: Zu Tailscale"
+table inet filter {
+    chain input {
+        # VPN-Zugang von Tailscale-Interface
+        iifname "$tailscale_interface" accept comment "VPN-Input: $tailscale_interface"
+    }
+    
+    chain forward {
+        # VPN-Forwarding: Von Tailscale zu anderen Netzen
+        iifname "$tailscale_interface" accept comment "VPN-Forward: Von $tailscale_interface"
+        
+        # VPN-Forwarding: Antworten zurück zu Tailscale
+        oifname "$tailscale_interface" ct state related,established accept comment "VPN-Forward: Zu $tailscale_interface"
+    }
+}
 EOF
     
     # Falls VPN-Modell: Erstelle auch NAT-Regeln
     if [ "${ACCESS_MODEL:-2}" = "1" ]; then
+        log_info "  -> Erstelle NAT-Regeln für Tailscale Subnet-Routing..."
         generate_nat_rules  # Diese Funktion erstellt 90-nat.conf
     fi
     
@@ -806,7 +815,13 @@ EOF
         if nft list chain inet filter input 2>/dev/null | grep -q "tailscale"; then
             log_ok "  ✅ Tailscale-Input-Regeln sind aktiv"
         else
-            log_warn "  ⚠️  Tailscale-Input-Regeln nicht sichtbar"
+            log_warn "  ⚠️ Tailscale-Input-Regeln nicht sichtbar"
+        fi
+        
+        if nft list chain inet filter forward 2>/dev/null | grep -q "tailscale"; then
+            log_ok "  ✅ Tailscale-Forward-Regeln sind aktiv"
+        else
+            log_warn "  ⚠️ Tailscale-Forward-Regeln nicht sichtbar"
         fi
         
     else
@@ -817,7 +832,7 @@ EOF
 
 ##
 # Aktiviert Docker-Regeln dynamisch (wird vom Container-Modul aufgerufen)  
-# KORRIGIERT: Erweitert bestehende Chains statt neue zu erstellen
+# KORRIGIERT: Verwendet korrekte modulare NFTables-Syntax
 ##
 activate_docker_rules() {
     local docker_interface="$1"
@@ -830,11 +845,11 @@ activate_docker_rules() {
     
     log_info "🐳 Aktiviere Docker-Regeln für Interface '$docker_interface'..."
     
-    # Erstelle 40-docker.conf mit ERWEITERTEN Regeln
+    # Erstelle 40-docker.conf mit korrekter modularer Struktur
     local rules_file="/etc/nftables.d/40-docker.conf"
     cat > "$rules_file" <<EOF
 # =============================================================================
-# DOCKER-CONTAINER REGELN (dynamisch hinzugefügt) - v4.3
+# DOCKER-CONTAINER REGELN (dynamisch hinzugefügt) - v4.4
 # =============================================================================
 # Diese Regeln werden NACH der Docker-Installation dynamisch hinzugefügt
 #
@@ -843,27 +858,35 @@ activate_docker_rules() {
 # Status: Aktiviert am $(date)
 # =============================================================================
 
-# Docker-Container untereinander (immer benötigt)
-insert rule inet filter forward position 0 iifname "$docker_interface" oifname "$docker_interface" accept comment "Docker-Container untereinander"
+table inet filter {
+    chain forward {
+        # Docker-Container untereinander (immer benötigt)
+        iifname "$docker_interface" oifname "$docker_interface" accept comment "Docker-Container untereinander"
 EOF
 
     # Tailscale <-> Docker Integration (falls verfügbar)
     if [ -n "$tailscale_interface" ]; then
         cat >> "$rules_file" <<EOF
-
-# VPN <-> CONTAINER INTEGRATION (AKTIV)
-insert rule inet filter forward position 0 iifname "$tailscale_interface" oifname "$docker_interface" accept comment "VPN zu Docker-Container"  
-insert rule inet filter forward position 1 iifname "$docker_interface" oifname "$tailscale_interface" ct state related,established accept comment "Container-Antworten an VPN"
+        
+        # VPN <-> CONTAINER INTEGRATION (AKTIV)
+        iifname "$tailscale_interface" oifname "$docker_interface" accept comment "VPN zu Docker-Container"  
+        iifname "$docker_interface" oifname "$tailscale_interface" ct state related,established accept comment "Container-Antworten an VPN"
 EOF
         log_info "  -> VPN-Container-Integration aktiviert"
     else
         cat >> "$rules_file" <<EOF
-
-# VPN <-> CONTAINER INTEGRATION (INAKTIV - Tailscale nicht verfügbar)
-# insert rule inet filter forward iifname "tailscale0" oifname "$docker_interface" accept comment "VPN zu Docker-Container"
-# insert rule inet filter forward iifname "$docker_interface" oifname "tailscale0" ct state related,established accept comment "Container-Antworten an VPN"
+        
+        # VPN <-> CONTAINER INTEGRATION (INAKTIV - Tailscale nicht verfügbar)
+        # iifname "tailscale0" oifname "$docker_interface" accept comment "VPN zu Docker-Container"
+        # iifname "$docker_interface" oifname "tailscale0" ct state related,established accept comment "Container-Antworten an VPN"
 EOF
     fi
+
+    # Schließe die Tabellen-Definition
+    cat >> "$rules_file" <<EOF
+    }
+}
+EOF
     
     # Lade die Konfiguration neu
     if systemctl reload nftables >/dev/null 2>&1; then
@@ -873,7 +896,12 @@ EOF
         if nft list chain inet filter forward 2>/dev/null | grep -q "docker"; then
             log_ok "  ✅ Docker-Forward-Regeln sind aktiv"
         else
-            log_warn "  ⚠️  Docker-Forward-Regeln nicht sichtbar"
+            log_warn "  ⚠️ Docker-Forward-Regeln nicht sichtbar"
+        fi
+        
+        # Erweiterte Verifikation für VPN-Integration
+        if [ -n "$tailscale_interface" ] && nft list chain inet filter forward 2>/dev/null | grep -q "$tailscale_interface.*$docker_interface"; then
+            log_ok "  ✅ VPN-Container-Integration ist aktiv"
         fi
         
     else  
@@ -881,7 +909,6 @@ EOF
         return 1
     fi
 }
-
 ##
 # Debugging-Funktion: Zeigt den aktuellen Firewall-Status
 ##
