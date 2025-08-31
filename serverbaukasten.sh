@@ -199,39 +199,82 @@ load_modules() {
 # ═══════════════════════════════════════════════════════════════════════════
 
 ##
-# Führt die Setup-Module in der korrekten Reihenfolge aus.
+# Führt die einzelnen Setup-Module in der korrekten Reihenfolge aus.
+# KORRIGIERT v4.3: Zweistufiges Firewall-Setup für NFTables/Docker/CrowdSec-Kompatibilität
+# @param bool $1 Test-Modus (true/false).
 ##
 run_setup() {
-    log_info "Phase 1/5: Vorbereitung..."
+    local TEST_MODE="$1"
+    
+    # ═══════════════════════════════════════════════════════════════════════════
+    # PHASE 1: VORBEREITUNG & SYSTEM-GRUNDLAGEN
+    # ═══════════════════════════════════════════════════════════════════════════
+    log_info "Phase 1/5: Vorbereitung & System-Grundlagen..."
+    
     pre_flight_checks
     load_config_from_file "$CONFIG_FILE"
     
-    # Interface-Detection NACH Config-Load - nur wenn nötig
+    # Interface-Detection NACH Config-Load (für NAT-Regeln später)
     detect_primary_interface_if_needed
     
+    # Systembereinigung für sauberen Ausgangszustand
     module_cleanup
 
+    # ═══════════════════════════════════════════════════════════════════════════
+    # PHASE 2: SYSTEM-FUNDAMENT (OS, Pakete, Kernel)
+    # ═══════════════════════════════════════════════════════════════════════════
     log_info "Phase 2/5: System-Fundament (OS, Pakete, Kernel)..."
+    
     detect_os
     module_fix_apt_sources
     module_base
     module_system_update "$TEST_MODE"
+    
+    # WICHTIG: Kernel-Härtung VOR Firewall (IP-Forwarding für Docker/VPN)
     module_kernel_hardening
 
-    log_info "Phase 3/5: Sicherheits-Architektur (Firewall, IPS, Monitoring)..."
-    module_security "$TEST_MODE"
+    # ═══════════════════════════════════════════════════════════════════════════
+    # PHASE 3: BASIS-SICHERHEIT (Firewall + IPS + Monitoring)
+    # ═══════════════════════════════════════════════════════════════════════════
+    log_info "Phase 3/5: Basis-Sicherheit (SSH, BASIS-Firewall, CrowdSec)..."
     
-    log_info "Phase 4/5: Kern-Dienste (Netzwerk & Container)..."
+    # KORRIGIERT: module_security macht jetzt ALLES auf einmal:
+    # - SSH-Härtung & AppArmor
+    # - iptables-nft Backend
+    # - BASIS-Firewall (ohne VPN/Docker)
+    # - CrowdSec IPS
+    # - AIDE & RKHunter (falls nicht Test-Modus)
+    module_security "$TEST_MODE"
+
+    # ═══════════════════════════════════════════════════════════════════════════
+    # PHASE 4: DIENSTE & DYNAMISCHE FIREWALL-ERWEITERUNG
+    # ═══════════════════════════════════════════════════════════════════════════
+    log_info "Phase 4/5: Dienste installieren & Firewall dynamisch erweitern..."
+    
+    # STUFE 1: Netzwerk-Dienste (Tailscale VPN)
+    # -> Ruft activate_tailscale_rules() auf und erweitert die Firewall
     module_network "$TEST_MODE"
+    
+    # STUFE 2: Container-Dienste (Docker Engine + Management)
     if [ "${SERVER_ROLE:-2}" = "1" ]; then
+        # -> Ruft activate_docker_rules() auf und erweitert die Firewall
         module_container
         module_deploy_containers
     fi
- 
-    log_info "Phase 5/5: Abschluss-Arbeiten (Mail, Logs, Backup, Verifikation)..."
+
+    # ═══════════════════════════════════════════════════════════════════════════
+    # PHASE 5: ABSCHLUSS & FINALISIERUNG
+    # ═══════════════════════════════════════════════════════════════════════════
+    log_info "Phase 5/5: Abschluss-Arbeiten (Mail, Logs, Verifikation)..."
+    
+    # System-Services (Mail, Logging)
     module_mail_setup
     module_journald_optimization
+    
+    # Finale Verifikation aller Komponenten
     module_verify_setup
+    
+    # Sicherheits-Cleanup (sudo-Rechte normalisieren)
     cleanup_admin_sudo_rights
 }
 
