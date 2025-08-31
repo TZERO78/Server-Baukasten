@@ -1,277 +1,267 @@
 #!/bin/bash
 ################################################################################
 #
-# MODUL: CONTAINER (DOCKER) - v4.3 KORRIGIERT
+# MODUL: MANAGEMENT-CONTAINER - v4.3 KORRIGIERT
 #
-# @description: Konfiguriert Docker-Engine mit gehärteter Konfiguration und
-#               dynamischer Firewall-Integration über activate_docker_rules()
-# @author:      Markus F. (TZERO78) & KI-Assistenten  
+# @description: Startet Management-Container (Portainer, Watchtower) mit
+#               intelligenter Netzwerk-Integration und Fehlerbehandlung
+# @author:      Markus F. (TZERO78) & KI-Assistenten
 # @repository:  https://github.com/TZERO78/Server-Baukasten
 #
 # ÄNDERUNGEN v4.3:
-# - Nutzt activate_docker_rules() für dynamische Firewall-Integration
-# - Bessere Docker-Interface-Erkennung und Validierung
-# - Robuste systemd-Abhängigkeiten für NFTables-Integration
-# - Erweiterte Fehlerbehandlung und Status-Verifikation
-# - Optimierte daemon.json mit Sicherheits-Fokus
+# - Robuste Container-Bereinigung vor Neustart
+# - Intelligente Port-Bindung basierend auf Zugriffs-Modell
+# - Bessere Fehlerbehandlung und Status-Verifikation
+# - Tailscale-Integration für sichere Container-Verwaltung
+# - Erweiterte Logging und Debug-Informationen
 #
 ################################################################################
 
 ##
-# Hauptfunktion: Konfiguriert Docker-Engine mit gehärteter Konfiguration
-# und integriert es sauber in die NFTables-Firewall
+# Hauptfunktion: Startet die Management-Container mit optimaler Konfiguration
 ##
-module_container() {
-    # Guard Clause: Nur ausführen wenn SERVER_ROLE=1 (Docker-Host)
+module_deploy_containers() {
+    # Guard Clause: Nur ausführen wenn Docker-Host konfiguriert
     if [ "$SERVER_ROLE" != "1" ]; then
-        log_info "🐳 Container-Modul übersprungen (SERVER_ROLE != 1)"
+        log_info "🐳 Management-Container übersprungen (SERVER_ROLE != 1)"
         return 0
     fi
     
-    log_info "🐳 MODUL: Container-Engine (Docker mit NFTables-Integration)"
+    log_info "🐳 MODUL: Management-Container (Portainer & Watchtower)"
 
-    # --- SCHRITT 1: Docker-Konfigurationsverzeichnis sicherstellen ---
-    log_info "  -> 1/6: Bereite Docker-Konfiguration vor..."
-    mkdir -p /etc/docker
-    local daemon_json="/etc/docker/daemon.json"
-    
-    # Backup der existierenden Konfiguration (falls vorhanden)
-    backup_and_register "$daemon_json"
-
-    # --- SCHRITT 2: Gehärtete Docker-Daemon-Konfiguration erstellen ---
-    log_info "  -> 2/6: Erstelle gehärtete Docker-Daemon-Konfiguration..."
-    
-    # Berechne Docker-Gateway-IP aus CIDR
-    local docker_gateway_ip
-    docker_gateway_ip=$(echo "$DOCKER_IPV4_CIDR" | cut -d'/' -f1 | sed 's/\.0$//').1
-    log_debug "Docker-Gateway-IP berechnet: $docker_gateway_ip"
-    
-    # Erstelle daemon.json mit jq für korrekte JSON-Syntax
-    if ! command -v jq >/dev/null 2>&1; then
-        log_error "jq ist nicht installiert! Benötigt für Docker-Konfiguration."
+    # --- VORAUSSETZUNGEN PRÜFEN ---
+    if ! command -v docker >/dev/null 2>&1; then
+        log_error "Docker ist nicht installiert! Modul wird übersprungen."
         return 1
     fi
     
-    log_info "     -> Docker-Netzwerk: $DOCKER_IPV4_CIDR (Gateway: $docker_gateway_ip)"
-    log_info "     -> IPv6-Netzwerk: $DOCKER_IPV6_CIDR"
-    
-    # Generiere daemon.json mit allen Sicherheits- und Performance-Optimierungen
-    jq -n \
-    --arg bip "$docker_gateway_ip/$(echo "$DOCKER_IPV4_CIDR" | cut -d'/' -f2)" \
-    --arg fixed_cidr "$DOCKER_IPV4_CIDR" \
-    --arg fixed_cidr_v6 "$DOCKER_IPV6_CIDR" \
-    '{
-        # NETZWERK-KONFIGURATION
-        "bip": $bip,
-        "fixed-cidr": $fixed_cidr,
-        "ipv6": true,
-        "fixed-cidr-v6": $fixed_cidr_v6,
-        
-        # FIREWALL-INTEGRATION (KRITISCH für NFTables-Kompatibilität)
-        "ip6tables": true,
-        "iptables": true,
-        
-        # LOGGING (strukturiert für systemd)
-        "log-driver": "journald",
-        "log-opts": { 
-            "tag": "{{.Name}}/{{.FullID}}",
-            "labels": "service"
-        },
-        
-        # SYSTEMD-INTEGRATION
-        "exec-opts": ["native.cgroupdriver=systemd"],
-        
-        # STORAGE & PERFORMANCE
-        "storage-driver": "overlay2",
-        "live-restore": true,
-        
-        # SICHERHEIT
-        "userland-proxy": false,
-        "no-new-privileges": true,
-        
-        # RESOURCE-LIMITS (VPS-optimiert)
-        "default-ulimits": {
-            "nofile": {
-                "Hard": 64000,
-                "Name": "nofile", 
-                "Soft": 64000
-            }
-        }
-    }' > "$daemon_json"
-    
-    log_ok "Gehärtete Docker-Konfiguration erstellt ($daemon_json)"
-
-    # --- SCHRITT 3: systemd-Integration für korrekte Start-Reihenfolge ---
-    log_info "  -> 3/6: Konfiguriere systemd-Abhängigkeiten für NFTables-Integration..."
-    
-    local override_dir="/etc/systemd/system/docker.service.d"
-    mkdir -p "$override_dir"
-
-    # KRITISCH: Docker muss NACH NFTables starten um Konflikte zu vermeiden
-    cat > "$override_dir/nftables-dependency.conf" <<'EOF'
-[Unit]
-# KRITISCH: Docker muss nach NFTables starten um Firewall-Konflikte zu vermeiden
-# Das verhindert die Race-Condition beim Boot und garantiert saubere Integration
-Requires=nftables.service
-After=nftables.service
-
-# Erweiterte Abhängigkeiten für Stabilität
-After=network-online.target
-Wants=network-online.target
-
-[Service]
-# Auto-Restart bei Problemen (VPS-Umgebung)
-Restart=on-failure
-RestartSec=10s
-
-# Erweiterte Timeouts für VPS mit langsamem I/O
-TimeoutStartSec=120s
-TimeoutStopSec=30s
-
-# Logging-Optimierung
-StandardOutput=journal
-StandardError=journal
-SyslogIdentifier=docker-daemon
-EOF
-
-    log_ok "systemd-Abhängigkeiten für Docker konfiguriert."
-
-    # --- SCHRITT 4: systemd-Konfiguration neu laden ---
-    run_with_spinner "Lade systemd-Konfiguration neu..." "systemctl daemon-reload"
-
-    # --- SCHRITT 5: Docker-Service starten und aktivieren ---
-    log_info "  -> 4/6: Starte Docker-Engine mit neuer Konfiguration..."
-    
-    # Stoppe Docker falls läuft (für sauberen Neustart mit neuer Config)
-    if systemctl is-active --quiet docker; then
-        log_info "     -> Stoppe Docker für Konfigurationsänderung..."
-        systemctl stop docker
-        sleep 2
+    if ! systemctl is-active --quiet docker; then
+        log_error "Docker-Service ist nicht aktiv! Modul wird übersprungen."
+        return 1
     fi
     
-    # Starte Docker mit neuer Konfiguration
-    if ! run_with_spinner "Aktiviere und starte Docker-Service..." "systemctl enable --now docker"; then
-        log_error "Docker-Service konnte nicht gestartet werden!"
-        log_error "Prüfe die Konfiguration: sudo journalctl -u docker.service"
+    if ! docker info >/dev/null 2>&1; then
+        log_error "Docker-Daemon ist nicht erreichbar! Modul wird übersprungen."
         return 1
     fi
 
-    # --- SCHRITT 6: Warte auf Docker-Initialisierung ---
-    log_info "  -> 5/6: Warte auf vollständige Docker-Initialisierung..."
+    # --- PORTAINER DEPLOYMENT ---
+    if [ "${INSTALL_PORTAINER:-ja}" = "ja" ]; then
+        deploy_portainer_container
+    else
+        log_info "  -> Portainer-Installation übersprungen (INSTALL_PORTAINER=nein)"
+    fi
+
+    # --- WATCHTOWER DEPLOYMENT ---
+    if [ "${INSTALL_WATCHTOWER:-ja}" = "ja" ]; then
+        deploy_watchtower_container
+    else
+        log_info "  -> Watchtower-Installation übersprungen (INSTALL_WATCHTOWER=nein)"
+    fi
+
+    # --- ABSCHLUSS-VERIFIKATION ---
+    verify_management_containers
     
-    local wait_time=0
-    local max_wait=30
-    local docker_interface=""
+    log_ok "Modul Management-Container erfolgreich abgeschlossen."
+}
+
+##
+# Deployt den Portainer-Container mit optimaler Konfiguration
+##
+deploy_portainer_container() {
+    log_info "  -> 1/2: Deploye Portainer Web-Management..."
     
-    while [ $wait_time -lt $max_wait ]; do
-        sleep 1
-        ((wait_time++))
+    # --- Container-Bereinigung für sauberen Start ---
+    local cleanup_output
+    cleanup_output=$(docker stop portainer 2>&1 || true)
+    [ -n "$cleanup_output" ] && log_debug "Portainer gestoppt: $cleanup_output"
+    
+    cleanup_output=$(docker rm portainer 2>&1 || true)  
+    [ -n "$cleanup_output" ] && log_debug "Portainer entfernt: $cleanup_output"
+    
+    # --- Port-Bindung basierend auf Zugriffs-Modell bestimmen ---
+    local portainer_bind=""
+    local access_info=""
+    
+    if [ "${ACCESS_MODEL:-2}" = "1" ] && [ "${TAILSCALE_ACTIVE:-false}" = "true" ]; then
+        # VPN-Modell: Binde nur an Tailscale oder localhost
+        local tailscale_ip="${TAILSCALE_IP:-127.0.0.1}"
+        portainer_bind="${tailscale_ip}:9443:9443 -p ${tailscale_ip}:8000:8000"
+        access_info="VPN-only (https://${tailscale_ip}:9443)"
+    else
+        # Öffentliches Modell: Binde an alle Interfaces
+        portainer_bind="9443:9443 -p 8000:8000"
+        access_info="Öffentlich (https://$(hostname -I | awk '{print $1}'):9443)"
+    fi
+    
+    log_info "     -> Port-Bindung: $access_info"
+    
+    # --- Portainer-Container starten ---
+    local portainer_cmd="docker run -d \
+        --name=portainer \
+        --restart=always \
+        -p $portainer_bind \
+        -v /var/run/docker.sock:/var/run/docker.sock \
+        -v portainer_data:/data \
+        --label='service=portainer' \
+        --label='managed-by=server-baukasten' \
+        portainer/portainer-ce:latest"
+
+    if run_with_spinner "Starte Portainer-Container (Image-Pull kann dauern)..." "$portainer_cmd"; then
+        log_ok "Portainer erfolgreich gestartet."
         
-        # Prüfe ob Docker-Socket verfügbar ist
-        if docker info >/dev/null 2>&1; then
-            # Ermittle Docker-Bridge-Interface
-            docker_interface=$(ip link show | grep -E '^[0-9]+: docker[0-9]*:' | head -n1 | cut -d: -f2 | tr -d ' ' || echo "")
+        # --- Container-Status verifizieren ---
+        sleep 3  # Kurz warten bis Container vollständig gestartet
+        local container_status
+        container_status=$(docker inspect portainer --format '{{.State.Status}}' 2>/dev/null || echo "unknown")
+        
+        if [ "$container_status" = "running" ]; then
+            log_ok "  ✅ Container-Status: Läuft"
+            log_info "  🌐 Web-Zugang: $access_info"
             
-            if [ -n "$docker_interface" ]; then
-                log_ok "Docker erfolgreich initialisiert (Interface: $docker_interface)"
-                break
+            # Erste Setup-Hinweise
+            log_info "  📋 Erste Anmeldung: Admin-Account in Web-UI erstellen"
+            if [ "${ACCESS_MODEL:-2}" = "2" ]; then
+                log_warn "  🔒 SICHERHEIT: Portainer ist öffentlich erreichbar!"
+                log_info "     -> Starkes Admin-Passwort wählen"
+                log_info "     -> Eventuell Firewall-Regel hinzufügen für Port 9443"
             fi
+        else
+            log_error "  ❌ Container-Status: $container_status"
+            log_info "Debug: docker logs portainer"
         fi
         
-        # Zeige Fortschritt bei längerer Wartezeit
-        if [ $((wait_time % 10)) -eq 0 ]; then
-            log_info "     -> Warte noch auf Docker-Initialisierung... (${wait_time}s)"
+    else
+        log_error "Portainer-Container konnte nicht gestartet werden!")
+        log_info "Debug-Befehle:"
+        log_info "  -> docker logs portainer"
+        log_info "  -> docker inspect portainer"
+    fi
+}
+
+##  
+# Deployt den Watchtower-Container für automatische Updates
+##
+deploy_watchtower_container() {
+    log_info "  -> 2/2: Deploye Watchtower Auto-Update-Service..."
+    
+    # --- Container-Bereinigung ---
+    docker stop watchtower >/dev/null 2>&1 || true
+    docker rm watchtower >/dev/null 2>&1 || true
+    
+    # --- Watchtower-Konfiguration ---
+    # Täglich um 04:00 Uhr, nur Container mit Label updaten
+    local watchtower_cmd="docker run -d \
+        --name=watchtower \
+        --restart=always \
+        -v /var/run/docker.sock:/var/run/docker.sock \
+        --label='service=watchtower' \
+        --label='managed-by=server-baukasten' \
+        containrrr/watchtower \
+        --schedule '0 4 * * *' \
+        --cleanup \
+        --label-enable \
+        --rolling-restart \
+        --include-restarting"
+
+    if run_with_spinner "Starte Watchtower-Container (Image-Pull kann dauern)..." "$watchtower_cmd"; then
+        log_ok "Watchtower erfolgreich gestartet."
+        
+        # --- Container-Status verifizieren ---
+        sleep 3
+        local container_status  
+        container_status=$(docker inspect watchtower --format '{{.State.Status}}' 2>/dev/null || echo "unknown")
+        
+        if [ "$container_status" = "running" ]; then
+            log_ok "  ✅ Container-Status: Läuft"
+            log_info "  ⏰ Update-Schedule: Täglich 04:00 Uhr"
+            log_info "  🏷️  Update-Modus: Nur Container mit Labels"
+            log_info "  🧹 Cleanup: Alte Images werden automatisch entfernt"
+        else
+            log_error "  ❌ Container-Status: $container_status"
+            log_info "Debug: docker logs watchtower"
         fi
-    done
+        
+    else
+        log_error "Watchtower-Container konnte nicht gestartet werden!")
+        log_info "Debug-Befehle:"
+        log_info "  -> docker logs watchtower"
+        log_info "  -> docker inspect watchtower"
+    fi
+}
+
+##
+# Verifiziert den Status aller Management-Container
+##
+verify_management_containers() {
+    log_info "  -> Finale Verifikation der Management-Container..."
     
-    # Validierung der Docker-Initialisierung
-    if [ -z "$docker_interface" ] || ! docker info >/dev/null 2>&1; then
-        log_error "Docker-Initialisierung fehlgeschlagen nach ${wait_time}s!"
-        log_error "Debug-Info:"
-        systemctl status docker --no-pager || true
-        docker info 2>&1 | head -10 || true
+    local running_containers=0
+    local total_expected=0
+    
+    # Prüfe Portainer
+    if [ "${INSTALL_PORTAINER:-ja}" = "ja" ]; then
+        ((total_expected++))
+        if docker ps --filter "name=portainer" --format "{{.Names}}" | grep -q "portainer"; then
+            ((running_containers++))
+            log_ok "  ✅ Portainer: Läuft"
+        else
+            log_error "  ❌ Portainer: Nicht laufend"
+        fi
+    fi
+    
+    # Prüfe Watchtower
+    if [ "${INSTALL_WATCHTOWER:-ja}" = "ja" ]; then
+        ((total_expected++))
+        if docker ps --filter "name=watchtower" --format "{{.Names}}" | grep -q "watchtower"; then
+            ((running_containers++))
+            log_ok "  ✅ Watchtower: Läuft"
+        else
+            log_error "  ❌ Watchtower: Nicht laufend"
+        fi
+    fi
+    
+    # Gesamtbewertung
+    log_info "--- MANAGEMENT-CONTAINER STATUS ---"
+    log_info "  Laufende Container: $running_containers/$total_expected"
+    
+    if [ $running_containers -eq $total_expected ] && [ $total_expected -gt 0 ]; then
+        log_ok "🎉 Alle Management-Container erfolgreich deployt!"
+    elif [ $running_containers -gt 0 ]; then
+        log_warn "⚠️  Teilweise erfolgreich ($running_containers/$total_expected Container laufen)"
+    else
+        log_error "❌ Keine Management-Container erfolgreich gestartet!"
         return 1
     fi
-
-    # --- SCHRITT 7: Firewall-Integration aktivieren ---
-    log_info "  -> 6/6: Aktiviere Docker-Firewall-Integration..."
     
-    # Ermittle Tailscale-Interface falls verfügbar
-    local tailscale_interface="${TAILSCALE_INTERFACE:-}"
-    if [ -z "$tailscale_interface" ] && [ "${TAILSCALE_ACTIVE:-false}" = "true" ]; then
-        tailscale_interface=$(ip link show | grep -E '^[0-9]+: tailscale[0-9]*:' | head -n1 | cut -d: -f2 | tr -d ' ' || echo "")
+    # Hilfreiche Informationen für den Admin
+    log_info "--- CONTAINER-VERWALTUNG ---"
+    log_info "  Alle Container: docker ps -a"
+    log_info "  Nur laufende: docker ps"  
+    log_info "  Container-Logs: docker logs <container-name>"
+    log_info "  Container stoppen: docker stop <container-name>"
+    log_info "  Container entfernen: docker rm <container-name>"
+    
+    if [ "${INSTALL_PORTAINER:-ja}" = "ja" ] && docker ps --filter "name=portainer" -q | grep -q .; then
+        local portainer_ip
+        if [ "${ACCESS_MODEL:-2}" = "1" ] && [ -n "${TAILSCALE_IP:-}" ]; then
+            portainer_ip="${TAILSCALE_IP}"
+        else
+            portainer_ip=$(hostname -I | awk '{print $1}')
+        fi
+        
+        log_info "--- PORTAINER-ZUGANG ---"
+        log_info "  Web-Interface: https://${portainer_ip}:9443"
+        
+        if [ "${ACCESS_MODEL:-2}" = "2" ]; then
+            log_info "  SSH-Tunnel (sicherer): ssh -L 9443:localhost:9443 ${ADMIN_USER:-admin}@${portainer_ip}"
+            log_info "  Dann im Browser: https://localhost:9443"
+        fi
     fi
-    
-    log_info "     -> Docker-Interface: $docker_interface"
-    log_info "     -> Tailscale-Interface: ${tailscale_interface:-nicht verfügbar}"
-    
-    # Aktiviere Docker-spezifische Firewall-Regeln
-    if activate_docker_rules "$docker_interface" "$tailscale_interface"; then
-        log_ok "Docker-Firewall-Regeln erfolgreich aktiviert."
-    else
-        log_error "Docker-Firewall-Integration fehlgeschlagen!"
-        log_warn "Docker funktioniert möglicherweise, aber Firewall-Regeln sind unvollständig."
-        # Nicht return 1 - Docker selbst funktioniert ja
-    fi
-
-    # --- SCHRITT 8: Finale Verifikation und Statusanzeige ---
-    log_info "  -> Finale Docker-Status-Verifikation..."
-    
-    # Service-Status
-    if systemctl is-active --quiet docker; then
-        log_ok "✅ Docker-Service: Aktiv"
-    else
-        log_error "❌ Docker-Service: Inaktiv"
-        return 1
-    fi
-    
-    # Docker-Info abrufen
-    local docker_version
-    docker_version=$(docker --version 2>/dev/null | cut -d' ' -f3 | tr -d ',' || echo "Unbekannt")
-    log_info "     -> Docker-Version: $docker_version"
-    
-    # Netzwerk-Info
-    local bridge_network
-    bridge_network=$(docker network inspect bridge --format '{{range .IPAM.Config}}{{.Subnet}}{{end}}' 2>/dev/null || echo "Standard")
-    log_info "     -> Bridge-Netzwerk: $bridge_network"
-    
-    # Container-Count
-    local container_count
-    container_count=$(docker ps -a --format "table" 2>/dev/null | wc -l 2>/dev/null || echo "0")
-    # Subtrahiere Header-Zeile
-    container_count=$((container_count - 1))
-    [ $container_count -lt 0 ] && container_count=0
-    log_info "     -> Vorhandene Container: $container_count"
-
-    # --- ERFOLGS-ZUSAMMENFASSUNG ---
-    log_ok "🎉 Docker-Engine erfolgreich konfiguriert und integriert!"
-    log_info "--- DOCKER-KONFIGURATION ---"
-    log_info "  🐳 Version: $docker_version"
-    log_info "  🌐 IPv4-Netzwerk: $DOCKER_IPV4_CIDR (Gateway: $docker_gateway_ip)"
-    log_info "  🌐 IPv6-Netzwerk: $DOCKER_IPV6_CIDR"
-    log_info "  🔌 Bridge-Interface: $docker_interface"
-    log_info "  🔗 NFTables-Integration: Aktiv"
-    
-    if [ -n "$tailscale_interface" ]; then
-        log_info "  🔐 VPN-Integration: Aktiv (Container über Tailscale erreichbar)"
-    else
-        log_info "  🔐 VPN-Integration: Nicht konfiguriert"
-    fi
-    
-    log_info "--- MANAGEMENT-BEFEHLE ---"
-    log_info "  Status prüfen: docker info"
-    log_info "  Container zeigen: docker ps -a"
-    log_info "  Netzwerke zeigen: docker network ls"
-    log_info "  Logs anzeigen: journalctl -u docker.service"
-    
-    # Setze globale Variablen für nachfolgende Module (z.B. module_deploy_containers)
-    export DOCKER_READY="true"
-    export DOCKER_INTERFACE="$docker_interface"
-    export DOCKER_GATEWAY_IP="$docker_gateway_ip"
     
     return 0
 }
 
 ################################################################################
-# ENDE MODUL CONTAINER v4.3
+# ENDE MODUL MANAGEMENT-CONTAINER v4.3
 ################################################################################
