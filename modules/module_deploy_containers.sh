@@ -132,7 +132,7 @@ deploy_portainer_container() {
         fi
         
     else
-        log_error "Portainer-Container konnte nicht gestartet werden!")
+        log_error "Portainer-Container konnte nicht gestartet werden!"
         log_info "Debug-Befehle:"
         log_info "  -> docker logs portainer"
         log_info "  -> docker inspect portainer"
