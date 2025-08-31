@@ -84,6 +84,7 @@ setup_tailscale() {
     fi
     
     # --- 5. Finale Verifikation ---
+    
     log_info "Warte 5 Sekunden auf den Verbindungsaufbau..."
     sleep 5
     
@@ -100,6 +101,21 @@ setup_tailscale() {
         return 1
     fi
     
+    # 6. Globale Variable mit dem erkannten Interface-Namen füllen
+    TAILSCALE_INTERFACE=$(ip -br a | awk '/^tailscale0/ {print $1}')
+    
+    if [ -n "$TAILSCALE_INTERFACE" ]; then
+        log_debug "Globaler Zustand aktualisiert: TAILSCALE_INTERFACE=$TAILSCALE_INTERFACE"
+        
+        #Das "Werkzeug" aus der Firewall-Bibliothek aufrufen
+        generate_tailscale_rules "$TAILSCALE_INTERFACE"
+        
+        # 3. Die neu erstellten Firewall-Regeln sofort anwenden
+        run_with_spinner "Aktualisiere Firewall-Regeln für Tailscale..." "systemctl reload nftables"
+    else
+        log_warn "Konnte Tailscale-Interface nicht finden. Firewall-Regeln werden übersprungen."
+    fi
+
     return 0
 }
 
