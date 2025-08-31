@@ -15,7 +15,7 @@
 # - Tailscale-Integration für sichere Container-Verwaltung
 # - Erweiterte Logging und Debug-Informationen
 #
-################################################################################
+##############################################################################
 
 ##
 # Hauptfunktion: Startet die Management-Container mit optimaler Konfiguration
@@ -26,7 +26,8 @@ module_deploy_containers() {
         log_info "🐳 Management-Container übersprungen (SERVER_ROLE != 1)"
         return 0
     fi
-    
+   
+
     log_info "🐳 MODUL: Management-Container (Portainer & Watchtower)"
 
     # --- VORAUSSETZUNGEN PRÜFEN ---
@@ -44,6 +45,19 @@ module_deploy_containers() {
         log_error "Docker-Daemon ist nicht erreichbar! Modul wird übersprungen."
         return 1
     fi
+    
+    # --- DOCKER-UMGEBUNG VORBEREITEN ---
+    log_info "  -> Bereite Docker-Umgebung vor..."
+    # Docker neu starten um sicherzustellen, dass alle Netzwerke und Volumes bereit sind    
+    if systemctl is-active --quiet docker; then
+        systemctl restart docker
+        log_info "Docker-Service neugestartet für NFTables-Sync"
+    else 
+        systemctl start docker
+        log_info "Docker-Service gestartet"
+    fi
+    sleep 3  # Kurz warten bis Docker vollständig bereit ist
+    log_ok "Docker-Umgebung ist bereit."
 
     # --- PORTAINER DEPLOYMENT ---
     if [ "${INSTALL_PORTAINER:-ja}" = "ja" ]; then
