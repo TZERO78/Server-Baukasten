@@ -183,7 +183,7 @@ deploy_watchtower_container() {
         fi
         
     else
-        log_error "Watchtower-Container konnte nicht gestartet werden!")
+        log_error "Watchtower-Container konnte nicht gestartet werden!"
         log_info "Debug-Befehle:"
         log_info "  -> docker logs watchtower"
         log_info "  -> docker inspect watchtower"
