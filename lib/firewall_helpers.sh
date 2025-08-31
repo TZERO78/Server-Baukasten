@@ -172,6 +172,7 @@ EOF
 
     log_ok "nftables-Service gegen versehentliches Leeren gesichert."
     run_with_spinner "Lade systemd-Konfiguration neu..." "systemctl daemon-reload"
+
 }
 
 # ===============================================================================
@@ -180,21 +181,13 @@ EOF
 
 ##
 # Erstellt das Firewall-Grundgerüst mit korrekten Prioritäten.
-# KORRIGIERT: Integriert GeoIP direkt in die Basis-Tabelle!
+# KORRIGIERT: Ohne DOCKER-Chains - Docker verwaltet seine eigenen iptables-Regeln
 ##
 generate_base_filter_rules() {
     local server_role="$1"
     local rules_file="/etc/nftables.d/10-base-filter.conf"
     
     log_info "  -> Erstelle Firewall-Grundgerüst mit integriertem GeoIP..."
-    
-    # Docker-Chains nur erstellen wenn Docker-Host konfiguriert
-    local docker_chains=""
-    if [ "$server_role" = "1" ]; then
-        log_debug "SERVER_ROLE=1: Erstelle leere DOCKER-Chains als Platzhalter."
-        docker_chains="    # Leere DOCKER-Chain - wird von Docker-Engine befüllt
-    chain DOCKER { }"
-    fi
 
     # GeoIP-Sets nur erstellen wenn aktiviert
     local geoip_sets=""
@@ -276,30 +269,29 @@ generate_base_filter_rules() {
 
     cat > "$rules_file" <<EOF
 # =============================================================================
-# BASIS-FIREWALL-REGELN MIT INTEGRIERTEM GEOIP (v4.3) - KORRIGIERT
+# BASIS-FIREWALL-REGELN MIT INTEGRIERTEM GEOIP (v4.4) - DOCKER-KOMPATIBEL
 # =============================================================================
-# Komplette Firewall-Basis mit allen Features in einer Datei
+# Komplette Firewall-Basis ohne Docker-Chain-Interferenz
 # 
 # KONFIGURATION:
 # - Server-Rolle: $server_role (1=Docker, 2=Einfach)
 # - GeoIP-Blocking: ${ENABLE_GEOIP_BLOCKING:-nein}
 # - SSH-Port: ${SSH_PORT:-22}
 #
-# WICHTIG: Priority 'filter' verhindert Konflikte mit Docker/CrowdSec
+# WICHTIG: Keine DOCKER-Chains - Docker verwaltet eigene iptables-Regeln
 # =============================================================================
 
-# NAT-Tabellen (IPv4 und IPv6) für Docker und VPN
+# NAT-Tabellen (IPv4 und IPv6) für VPN - OHNE Docker-Interferenz
 table ip nat {
-$docker_chains
+    # Docker erstellt hier dynamisch seine eigenen Chains
 }
 
 table ip6 nat {
-$docker_chains  
+    # Docker erstellt hier dynamisch seine eigenen Chains
 }
 
 # HAUPT-FILTER-TABELLE mit allen integrierten Features
-table inet filter {
-$docker_chains$geoip_sets$geoip_chain
+table inet filter {$geoip_sets$geoip_chain
 
     # -------------------------------------------------------------------------
     # INPUT-CHAIN: Eingehender Traffic ZUM SERVER
@@ -336,7 +328,7 @@ $geoip_jump
 }
 EOF
 
-    log_ok "Basis-Firewall mit integriertem GeoIP erstellt."
+    log_ok "Basis-Firewall ohne Docker-Chain-Interferenz erstellt."
 }
 
 ##
