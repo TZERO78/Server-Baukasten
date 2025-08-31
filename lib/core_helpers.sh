@@ -20,36 +20,6 @@
 ################################################################################
 
 ##
-# Prüft, ob der Kernel IPv6-NAT (MASQUERADE) unterstützt
-# 
-# Führt verschiedene Tests durch um festzustellen ob IPv6-NAT verfügbar ist:
-# 1. Kernel-Config-Datei prüfen (falls vorhanden)
-# 2. Kernel-Modul verfügbar und ladbar
- # @returns {string} "true" wenn IPv6-NAT unterstützt wird, "false" andernfalls
- ##
- check_ipv6_nat_kernel() {
-    local kconfig="/boot/config-$(uname -r)"
-
-    # 1) Kernel-Config (falls vorhanden)
-    if [ -f "$kconfig" ] && grep -q 'CONFIG_NF_NAT_MASQUERADE_IPV6=y' "$kconfig"; then
-        log_debug "IPv6-NAT: Kernel-Config aktiviert"
-        echo true; return
-    fi
-    
-    # 2) Modul vorhanden und ladbar?
-    if modinfo ip6t_MASQUERADE &>/dev/null; then
-        if modprobe ip6t_MASQUERADE 2>/dev/null; then
-           log_debug "IPv6-NAT: Modul ip6t_MASQUERADE geladen"
-           echo true; return
-        fi
-    fi
- 
-    # 3) Kein Support
-    log_debug "IPv6-NAT: Kein Support gefunden"
-    echo false
-}
-
-##
 # Führt einen Befehl aus. Zeigt im Normalmodus einen Spinner und bei Fehlern die
 # Fehlermeldung an. Im Verbose-Modus wird die gesamte Ausgabe live angezeigt.
 # @param string $1 Der Text, der neben dem Spinner angezeigt wird.
