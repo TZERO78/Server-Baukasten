@@ -1,19 +1,18 @@
 #!/bin/bash
 ################################################################################
 #
-# MODUL: VERIFIKATION DES SETUPS - v4.3 KORRIGIERT
+# MODUL: VERIFIKATION DES SETUPS - v4.4 KORRIGIERT
 #
 # @description: Prüft den Status der zweistufigen Firewall-Architektur und
 #               aller kritischen Services nach dem neuen Setup-Konzept
 # @author:      Markus F. (TZERO78) & KI-Assistenten
 # @repository:  https://github.com/TZERO78/Server-Baukasten
 #
-# ÄNDERUNGEN v4.3:
-# - Verstehe zweistufige Firewall-Architektur (Basis + Dynamische Erweiterungen)
-# - Verbesserte NFTables-Modul-Verifikation 
-# - Intelligente Service-Erkennung basierend auf tatsächlicher Konfiguration
-# - Erweiterte Docker/Tailscale/CrowdSec-Integration-Checks
-# - Detaillierte Firewall-Architektur-Analyse
+# KORREKTUREN v4.4:
+# - Fixed Tailscale-Detection (direkte Suche statt leere Variable)
+# - Fixed Emoji-Formatierung (keine doppelten Emojis)
+# - Fixed Return-Code Logic (verhindert falschen Rollback)
+# - Verbesserte Fehlerklassifizierung
 #
 ################################################################################
 
@@ -21,16 +20,15 @@
 # Hauptfunktion: Umfassende Verifikation aller Setup-Komponenten
 ##
 module_verify_setup() {
-    log_info "🔎 MODUL: Setup-Verifikation (Zweistufige Firewall-Architektur v4.3)"
+    log_info "🔎 MODUL: Setup-Verifikation (Zweistufige Firewall-Architektur v4.4)"
     
     # Sammle Services basierend auf tatsächlicher Konfiguration
     local critical_services=("ssh" "nftables")
     local important_services=()
     local optional_services=()
-    local firewall_modules=()
     
     # Dynamische Service-Erkennung basierend auf CONFIG und Installation
-    command -v crowdsec >/dev/null 2>&1 && important_services+=("crowdsec" "crowdsec-firewall-bouncer")
+    command -v crowdsec >/dev/null 2>&1 && important_services+=("crowdsec" "crowdsec-bouncer-setonly")
     [ "${SERVER_ROLE:-2}" = "1" ] && command -v docker >/dev/null 2>&1 && important_services+=("docker")
     [ "${ENABLE_GEOIP_BLOCKING:-nein}" = "ja" ] && optional_services+=("geoip-update.timer")
     [ "${ENABLE_SYSTEM_MAIL:-nein}" = "ja" ] && [ "${TEST_MODE:-false}" != "true" ] && optional_services+=("system-backup.timer")
@@ -53,7 +51,7 @@ module_verify_setup() {
     done
     
     # ═══════════════════════════════════════════════════════════════════════════
-    # FIREWALL-ARCHITEKTUR VERIFIKATION (NEU v4.3)
+    # FIREWALL-ARCHITEKTUR VERIFIKATION
     # ═══════════════════════════════════════════════════════════════════════════
     log_info "  -> 2/6: Prüfe zweistufige Firewall-Architektur..."
     
@@ -190,7 +188,7 @@ module_verify_setup() {
     fi
     
     # ═══════════════════════════════════════════════════════════════════════════
-    # GESAMTBEWERTUNG & HANDLUNGSEMPFEHLUNGEN  
+    # GESAMTBEWERTUNG & KORRIGIERTE RETURN-LOGIC
     # ═══════════════════════════════════════════════════════════════════════════
     local total_issues=$((failed_critical + failed_important))
     
@@ -203,12 +201,12 @@ module_verify_setup() {
         log_ok "   ✅ Firewall-Architektur ist vollständig funktional"
         log_ok "   ✅ Server ist bereit für den Produktivbetrieb!"
         
-    elif [ "$total_issues" -le 2 ]; then
+    elif [ "$failed_critical" -eq 0 ] && [ "$total_issues" -le 2 ]; then
         log_warn "📊 SYSTEM-STATUS: GUT"
         log_warn "   ⚠️ $total_issues kleinere Problem(e) sollten behoben werden"
         log_ok "   ✅ Server ist grundsätzlich einsatzbereit"
         
-    elif [ "$total_issues" -le 5 ]; then
+    elif [ "$failed_critical" -eq 0 ] && [ "$total_issues" -le 5 ]; then
         log_warn "📊 SYSTEM-STATUS: AKZEPTABEL"  
         log_warn "   ⚠️ $total_issues Problem(e) erfordern Aufmerksamkeit"
         log_warn "   ⚠️ Sicherheit oder Funktionalität ist eingeschränkt"
@@ -230,19 +228,23 @@ module_verify_setup() {
     
     if [ "$failed_important" -gt 0 ]; then
         log_info "--- EMPFOHLENE REPARATUREN ---"
-        command -v crowdsec >/dev/null 2>&1 && log_info "  • CrowdSec: sudo systemctl restart crowdsec crowdsec-firewall-bouncer"
+        command -v crowdsec >/dev/null 2>&1 && log_info "  • CrowdSec: sudo systemctl restart crowdsec crowdsec-bouncer-setonly"
         [ "${SERVER_ROLE:-2}" = "1" ] && log_info "  • Docker: sudo systemctl restart docker"
         log_info "  • Firewall: sudo systemctl reload nftables"
     fi
     
     log_info "-------------------------------------"
     
-    # Return Code für weitere Verarbeitung (wichtig für Haupt-Skript)
-    return $total_issues
+    # KORRIGIERTE RETURN-LOGIC: Nur bei kritischen Problemen Rollback auslösen
+    if [ "$failed_critical" -gt 0 ]; then
+        return 1  # Echter kritischer Fehler -> Rollback
+    else
+        return 0  # System ist grundsätzlich OK -> Kein Rollback
+    fi
 }
 
 ##
-# Neue Funktion: Verifikation der Basis-Firewall-Architektur
+# Verifikation der Basis-Firewall-Architektur
 ##
 verify_base_firewall_architecture() {
     log_info "    -> Prüfe Basis-Firewall-Architektur..."
@@ -319,35 +321,40 @@ verify_base_firewall_architecture() {
 }
 
 ##
-# Neue Funktion: Verifikation der dynamischen Firewall-Erweiterungen
+# KORRIGIERTE VERSION: Verifikation der dynamischen Firewall-Erweiterungen
 ##
 verify_dynamic_firewall_extensions() {
     log_info "    -> Prüfe dynamische Firewall-Erweiterungen..."
     local extension_issues=0
     
-    # 1. Tailscale-Integration (falls VPN-Modell)
+    # 1. Tailscale-Integration (falls VPN-Modell) - KORRIGIERT
     if [ "${ACCESS_MODEL:-2}" = "1" ]; then
         log_info "      -> VPN-Modell konfiguriert: Prüfe Tailscale-Integration..."
         
-        if [ "${TAILSCALE_ACTIVE:-false}" = "true" ] && [ -n "${TAILSCALE_INTERFACE:-}" ]; then
-            # Prüfe ob Tailscale-Regeln in der Firewall sind
-            if nft list ruleset 2>/dev/null | grep -q "${TAILSCALE_INTERFACE}"; then
-                log_ok "        ✅ Tailscale-Firewall-Integration aktiv"
-                
-                # Prüfe NAT-Regeln
-                if nft list table ip nat 2>/dev/null | grep -q "${TAILSCALE_INTERFACE}"; then
-                    log_ok "        ✅ Tailscale-NAT-Regeln aktiv"
-                else
-                    log_warn "        ⚠️ Tailscale-NAT-Regeln fehlen"
-                    ((extension_issues++))
-                fi
+        # KORRIGIERT: Direkte Suche nach tailscale0 statt leerer Variable
+        if nft list ruleset 2>/dev/null | grep -q "tailscale0"; then
+            log_ok "        ✅ Tailscale-Firewall-Integration aktiv"
+            
+            # Prüfe NAT-Regeln
+            if nft list table ip nat 2>/dev/null | grep -q "tailscale0"; then
+                log_ok "        ✅ Tailscale-NAT-Regeln aktiv"
             else
-                log_error "        ❌ Tailscale-Firewall-Regeln fehlen!"
+                log_warn "        ⚠️ Tailscale-NAT-Regeln fehlen"
                 ((extension_issues++))
             fi
         else
-            log_warn "        ⚠️ Tailscale nicht aktiv (VPN-Modell aber nicht verbunden)"
+            log_error "        ❌ Tailscale-Firewall-Regeln fehlen!"
             ((extension_issues++))
+        fi
+        
+        # Prüfe auch ob Tailscale tatsächlich verbunden ist
+        if command -v tailscale >/dev/null 2>&1; then
+            if tailscale status >/dev/null 2>&1 && ! tailscale status 2>/dev/null | grep -q "Logged out"; then
+                log_ok "        ✅ Tailscale VPN ist verbunden"
+            else
+                log_warn "        ⚠️ Tailscale VPN nicht verbunden"
+                ((extension_issues++))
+            fi
         fi
     else
         log_info "      -> Öffentliches Modell: Tailscale-Integration nicht erforderlich"
@@ -357,7 +364,7 @@ verify_dynamic_firewall_extensions() {
     if [ "${SERVER_ROLE:-2}" = "1" ]; then
         log_info "      -> Container-Host konfiguriert: Prüfe Docker-Integration..."
         
-        if [ "${DOCKER_READY:-false}" = "true" ] && systemctl is-active --quiet docker; then
+        if systemctl is-active --quiet docker; then
             # Prüfe Docker-Firewall-Integration
             if nft list ruleset 2>/dev/null | grep -q "docker"; then
                 log_ok "        ✅ Docker-Firewall-Integration aktiv"
@@ -383,7 +390,7 @@ verify_dynamic_firewall_extensions() {
                 log_warn "        ⚠️ Docker-Netzwerk-Info nicht verfügbar"
             fi
         else
-            log_error "        ❌ Docker nicht bereit (Service oder DOCKER_READY=false)"
+            log_error "        ❌ Docker-Service ist nicht aktiv"
             ((extension_issues++))
         fi
     else
@@ -401,7 +408,7 @@ verify_dynamic_firewall_extensions() {
             ((extension_issues++))
         fi
         
-        if systemctl is-active --quiet crowdsec-firewall-bouncer; then
+        if systemctl is-active --quiet crowdsec-bouncer-setonly; then
             log_ok "        ✅ CrowdSec-Bouncer aktiv"
         else
             log_warn "        ⚠️ CrowdSec-Bouncer nicht aktiv"
@@ -413,7 +420,7 @@ verify_dynamic_firewall_extensions() {
 }
 
 ##
-# Neue Funktion: Sudo-Sicherheits-Status prüfen
+# Sudo-Sicherheits-Status prüfen
 ##
 verify_sudo_security_status() {
     local sudo_issues=0
@@ -472,7 +479,7 @@ verify_sudo_security_status() {
 }
 
 ##
-# Neue Funktion: Netzwerk-Konnektivität prüfen
+# Netzwerk-Konnektivität prüfen
 ##
 verify_network_connectivity() {
     local network_issues=0
@@ -542,5 +549,5 @@ verify_network_connectivity() {
 }
 
 ################################################################################
-# ENDE MODUL SETUP-VERIFIKATION v4.3
+# ENDE MODUL SETUP-VERIFIKATION v4.4 KORRIGIERT
 ################################################################################
