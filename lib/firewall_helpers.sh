@@ -332,126 +332,71 @@ EOF
 }
 
 ##
-# GeoIP wird jetzt direkt in generate_base_filter_rules() integriert!
-# Diese Funktion ist nicht mehr nötig.
+# Erstellt die CrowdSec IPS-Regeln
+# Diese Funktion erstellt die NFTables-Struktur für CrowdSec
 ##
-
-##
-# Erstellt die Tailscale-VPN-Regeln
-# Parameter: Interface-Name (z.B. "tailscale0")
-##
-generate_tailscale_rules() {
-    local tailscale_interface="$1"
-
-    if [ -z "$tailscale_interface" ]; then
-        log_error "generate_tailscale_rules: Kein Interface-Name übergeben!"
-        return 1
-    fi
-    
-    local rules_file="/etc/nftables.d/30-tailscale.conf"
-    log_info "  -> Erstelle Tailscale-VPN-Regeln für Interface '$tailscale_interface'..."
+generate_crowdsec_rules() {
+    local rules_file="/etc/nftables.d/20-crowdsec.conf"
+    log_info "  -> Erstelle CrowdSec IPS-Regeln..."
 
     cat > "$rules_file" <<EOF
 # =============================================================================
-# TAILSCALE-VPN REGELN (Server-Baukasten v4.3)
+# CROWDSEC IPS-REGELN (Server-Baukasten v4.0)
 # =============================================================================
-# Sichere VPN-Verbindungen über Tailscale
+# Intelligente Angriffserkennung und -abwehr durch CrowdSec
 #
 # KONFIGURATION:
-# - Tailscale-Interface: $tailscale_interface
-# - Primäres Interface: ${PRIMARY_INTERFACE:-nicht gesetzt}
+# - Max SSH-Fehlversuche: ${CROWDSEC_MAXRETRY:-5}
+# - Ban-Dauer: ${CROWDSEC_BANTIME:-48h}
+# - Backend: NFTables (nativ integriert)
 #
 # FUNKTIONSWEISE:
-# 1. INPUT: Erlaube allen Traffic VOM VPN ZUM Server
-# 2. FORWARD: Erlaube VPN-Traffic zu anderen Netzen (Subnet-Routing)
-# 3. NAT: Erstellt separaten NAT-Bereich (90-nat.conf)
+# 1. CrowdSec analysiert Logs und erkennt Angriffsmuster
+# 2. Angreifer-IPs werden in die Sets eingetragen (mit Timeout)
+# 3. Firewall blockiert Traffic von gelisteten IPs automatisch
+# 4. Priority -10 = Blockiert VOR allen anderen Regeln
 # =============================================================================
 
-# INPUT-Regeln: Traffic ZUM Server über VPN
-# Tailscale ist vertrauenswürdig - erlaube allen Traffic
-add rule inet filter input iifname "$tailscale_interface" accept comment "VPN-Input: Tailscale zu Server"
-
-# FORWARD-Regeln: Traffic DURCH den Server (Subnet-Routing/Exit-Node)
-# Erlaube VPN-Clients den Zugriff auf andere Netzwerke durch den Server
-add rule inet filter forward iifname "$tailscale_interface" accept comment "VPN-Forward: Von Tailscale zu anderen Netzen"
-
-# Erlaube Antwort-Traffic zurück ins VPN
-add rule inet filter forward oifname "$tailscale_interface" ct state related,established accept comment "VPN-Forward: Antworten zurück an Tailscale"
-
-# HINWEISE:
-# - NAT-Regeln für Internet-Zugang: siehe 90-nat.conf
-# - Docker-Integration: siehe 40-docker.conf  
-# - Tailscale kümmert sich um interne Verschlüsselung und Routing
-EOF
-
-    log_ok "Tailscale-VPN-Regeln für Interface '$tailscale_interface' erstellt."
+# IPv4 CrowdSec-Tabelle
+table ip crowdsec {
+    # Set für gebannte IPv4-Adressen (mit automatischem Timeout)
+    set crowdsec-blacklists {
+        type ipv4_addr
+        flags timeout
+        comment "Automatisch verwaltete Liste von Angreifer-IPs"
+    }
+    
+    # Input-Chain mit höchster Priorität (-10)
+    chain crowdsec-chain {
+        type filter hook input priority -10; policy accept;
+        ip saddr @crowdsec-blacklists counter drop comment "CrowdSec IPv4 Block"
+    }
 }
 
-##
-# Erstellt die Docker-Container-Regeln
-# Parameter: Docker-Interface, Optional: Tailscale-Interface
-##
-generate_docker_rules() {
-    local docker_interface="$1" 
-    local tailscale_interface="$2"  # Optional
-
-    if [ -z "$docker_interface" ]; then
-        log_error "generate_docker_rules: Kein Docker-Interface übergeben!"
-        return 1
-    fi
+# IPv6 CrowdSec-Tabelle  
+table ip6 crowdsec6 {
+    # Set für gebannte IPv6-Adressen
+    set crowdsec6-blacklists {
+        type ipv6_addr
+        flags timeout
+        comment "Automatisch verwaltete Liste von IPv6-Angreifern"
+    }
     
-    local rules_file="/etc/nftables.d/40-docker.conf"
-    log_info "  -> Erstelle Docker-Container-Regeln..."
-
-    cat > "$rules_file" <<EOF
-# =============================================================================
-# DOCKER-CONTAINER REGELN (Server-Baukasten v4.3)
-# =============================================================================
-# Netzwerk-Regeln für Docker-Container
-#
-# KONFIGURATION:
-# - Docker-Interface: $docker_interface
-# - Tailscale-Interface: ${tailscale_interface:-nicht konfiguriert}
-#
-# WICHTIG: Docker erstellt seine eigenen iptables-Regeln zusätzlich!
-# Diese NFTables-Regeln ergänzen Docker's automatische Regeln.
-# =============================================================================
-
-EOF
-
-    # Tailscale <-> Docker Integration (falls Tailscale aktiv)
-    if [ -n "$tailscale_interface" ]; then
-        cat >> "$rules_file" <<EOF
-# VPN <-> CONTAINER INTEGRATION (AKTIV)
-# Erlaube VPN-Clients den direkten Zugriff auf Container
-add rule inet filter forward iifname "$tailscale_interface" oifname "$docker_interface" accept comment "VPN zu Docker-Container"
-add rule inet filter forward iifname "$docker_interface" oifname "$tailscale_interface" ct state related,established accept comment "Container-Antworten an VPN"
-
-EOF
-    else
-        cat >> "$rules_file" <<EOF
-# VPN <-> CONTAINER INTEGRATION (INAKTIV)  
-# Tailscale nicht konfiguriert - VPN-Container-Regeln sind deaktiviert
-# Beispiel für manuelle Aktivierung:
-# add rule inet filter forward iifname "tailscale0" oifname "$docker_interface" accept comment "VPN zu Docker-Container"
-# add rule inet filter forward iifname "$docker_interface" oifname "tailscale0" ct state related,established accept comment "Container-Antworten an VPN"
-
-EOF
-    fi
-
-    cat >> "$rules_file" <<EOF
-# CONTAINER-INTERNE KOMMUNIKATION
-# Container müssen untereinander kommunizieren können (Docker-Networks)
-add rule inet filter forward iifname "$docker_interface" oifname "$docker_interface" accept comment "Docker-Container untereinander"
+    # Input-Chain für IPv6
+    chain crowdsec6-chain {
+        type filter hook input priority -10; policy accept;
+        ip6 saddr @crowdsec6-blacklists counter drop comment "CrowdSec IPv6 Block"
+    }
+}
 
 # HINWEISE:
-# - Docker erstellt automatisch zusätzliche iptables-Regeln für Port-Forwarding
-# - Diese NFTables-Regeln laufen parallel und ergänzen Docker's Regeln
-# - Für Container-Zugriff von außen: siehe Docker-Dokumentation für Port-Mapping
-# - Container-zu-Internet: siehe Docker's NAT-Regeln (automatisch)
+# - Sets werden automatisch vom crowdsec-firewall-bouncer verwaltet
+# - Timeout-Werte entsprechen der CrowdSec-Konfiguration
+# - Counters zeigen Anzahl blockierter Angriffe
+# - Bei Problemen: systemctl status crowdsec-firewall-bouncer
 EOF
 
-    log_ok "Docker-Container-Regeln erstellt."
+    log_ok "CrowdSec IPS-Regeln mit IPv4/IPv6-Unterstützung erstellt."
 }
 
 ##
@@ -594,6 +539,10 @@ generate_nftables_config() {
     # 3. BASIS-Regel-Module erstellen (ohne VPN/Docker-spezifische Teile)
     log_info "  -> Erstelle BASIS-Module..."
     
+    # NEU: CrowdSec-Regeln (Priority -10, frühe Verteidigung)
+    generate_crowdsec_rules
+    log_info "    ✅ CrowdSec IPS erstellt (Priority -10)"
+    
     # Basis-Regeln werden IMMER erstellt (inkl. GeoIP wenn aktiviert)
     generate_base_filter_rules "$SERVER_ROLE"
     log_info "    ✅ Basis-Firewall mit GeoIP erstellt"
@@ -609,7 +558,7 @@ generate_nftables_config() {
 # ==========================================================================
 # 
 # KONZEPT: Zweistufiges Setup
-# 1. BASIS-Setup: Grundlegende Firewall + GeoIP
+# 1. BASIS-Setup: CrowdSec IPS + Grundlegende Firewall + GeoIP
 # 2. DYNAMISCH: VPN/Docker-Regeln werden später hinzugefügt
 #
 # Generiert am: $(date '+%Y-%m-%d %H:%M:%S')
@@ -618,6 +567,7 @@ generate_nftables_config() {
 # AKTIVE BASIS-KONFIGURATION:
 # Server-Rolle:        ${SERVER_ROLE:-2} (1=Docker-Host, 2=Einfacher Server)
 # Zugriffs-Modell:     ${ACCESS_MODEL:-2} (1=VPN-only, 2=Öffentlich zugänglich)
+# CrowdSec IPS:        Aktiviert (Priority -10)
 # GeoIP-Blocking:      ${ENABLE_GEOIP_BLOCKING:-nein}
 # SSH-Port:            ${SSH_PORT:-22}
 # Primary Interface:   ${PRIMARY_INTERFACE:-auto-detect}
@@ -629,17 +579,16 @@ generate_nftables_config() {
 # KRITISCH: Lösche alle alten Regeln für sauberen Neustart!
 flush ruleset
 
-# Lade BASIS-Module
+# Lade BASIS-Module (in Prioritäts-Reihenfolge)
 include "/etc/nftables.d/*.conf"
 
 # ==========================================================================
 # HINWEISE FÜR ZWEISTUFIGES SETUP:
 # ==========================================================================
 # 
-# 🔧 BASIS-FIREWALL (jetzt aktiv):
-#   - Grundlegende Input/Forward/Output Chains
-#   - GeoIP-Blocking (falls aktiviert)  
-#   - SSH + ICMP Zugang
+# 🛡️ MEHRSTUFIGE VERTEIDIGUNG (BASIS - jetzt aktiv):
+#   - Priority -10: CrowdSec IPS (bekannte Angreifer sofort blockieren)
+#   - Priority 0:   GeoIP-Blocking + Basis-Firewall
 #   - Drop-Policy für nicht-explizit erlaubten Traffic
 #
 # 🚀 DYNAMISCHE ERWEITERUNGEN (werden später hinzugefügt):
@@ -648,17 +597,27 @@ include "/etc/nftables.d/*.conf"
 #   - Regeln werden in bestehende Chains eingefügt
 #
 # 🔍 STATUS PRÜFEN:
+#   - CrowdSec-Tabellen: nft list tables | grep crowdsec
 #   - Aktuelle Regeln: nft list ruleset
-#   - Einzelne Chains: nft list chain inet filter input
-#   - Counters: nft list chain inet filter geoip_check
+#   - Traffic-Counter: nft list chain inet filter geoip_check
 #
 # ==========================================================================
 EOF
 
-    log_ok "BASIS-Konfiguration mit detaillierter Dokumentation erstellt."
+    log_ok "BASIS-Konfiguration mit CrowdSec-Integration erstellt."
 
     # 5. Syntax-Validierung der BASIS-Konfiguration
     log_info "  -> Führe Syntax-Validierung der BASIS-Config durch..."
+    
+    # Teste CrowdSec-Modul
+    if [ -f "/etc/nftables.d/20-crowdsec.conf" ]; then
+        if nft -c -f "/etc/nftables.d/20-crowdsec.conf" >/dev/null 2>&1; then
+            log_ok "  ✅ 20-crowdsec.conf - Syntax OK"
+        else
+            log_error "  ❌ 20-crowdsec.conf - SYNTAX-FEHLER!"
+            return 1
+        fi
+    fi
     
     # Teste Basis-Modul einzeln
     if [ -f "/etc/nftables.d/10-base-filter.conf" ]; then
@@ -682,6 +641,7 @@ EOF
     log_ok "BASIS-NFTables-Konfiguration erfolgreich erstellt!"
     log_info "--- BASIS-MODULE AKTIV ---"
     log_info "  📁 Haupt-Config: /etc/nftables.conf"
+    log_info "  🛡️ CrowdSec IPS: /etc/nftables.d/20-crowdsec.conf (Priority -10)"
     log_info "  📁 Basis-Filter: /etc/nftables.d/10-base-filter.conf"
     
     if [ "${ENABLE_GEOIP_BLOCKING:-nein}" = "ja" ]; then
@@ -835,17 +795,25 @@ activate_docker_rules() {
         return 1
     fi
     
+    # Primary Interface automatisch erkennen
+    local primary_interface
+    primary_interface=$(ip route get 8.8.8.8 2>/dev/null | grep -oP 'dev \K\S+' | head -n1)
+    if [ -z "$primary_interface" ]; then
+        primary_interface="eth0"  # Fallback
+    fi
+    
     log_info "🐳 Aktiviere Docker-Regeln für Interface '$docker_interface'..."
     
     # Erstelle 40-docker.conf mit korrekter modularer Struktur
     local rules_file="/etc/nftables.d/40-docker.conf"
     cat > "$rules_file" <<EOF
 # =============================================================================
-# DOCKER-CONTAINER REGELN (dynamisch hinzugefügt) - v4.4
+# DOCKER-CONTAINER REGELN (dynamisch hinzugefügt) - v4.4 KORRIGIERT
 # =============================================================================
 # Diese Regeln werden NACH der Docker-Installation dynamisch hinzugefügt
 #
 # Docker-Interface: $docker_interface
+# Primary Interface: $primary_interface
 # Tailscale-Interface: ${tailscale_interface:-nicht konfiguriert}
 # Status: Aktiviert am $(date)
 # =============================================================================
@@ -854,24 +822,27 @@ table inet filter {
     chain forward {
         # Docker-Container untereinander (immer benötigt)
         iifname "$docker_interface" oifname "$docker_interface" accept comment "Docker-Container untereinander"
+        
+        # KRITISCH: Container → Internet (das war der Bug!)
+        iifname "$docker_interface" oifname "$primary_interface" accept comment "Container zu Internet"
 EOF
 
-    # Tailscale <-> Docker Integration (falls verfügbar)
-    if [ -n "$tailscale_interface" ]; then
+    # VPN <-> Docker Integration basierend auf ACCESS_MODEL
+    if [ "${ACCESS_MODEL:-2}" = "1" ]; then
         cat >> "$rules_file" <<EOF
         
-        # VPN <-> CONTAINER INTEGRATION (AKTIV)
-        iifname "$tailscale_interface" oifname "$docker_interface" accept comment "VPN zu Docker-Container"  
-        iifname "$docker_interface" oifname "$tailscale_interface" ct state related,established accept comment "Container-Antworten an VPN"
+        # VPN <-> CONTAINER INTEGRATION (VPN-Modell aktiv)
+        iifname "${tailscale_interface:-tailscale0}" oifname "$docker_interface" accept comment "VPN zu Docker-Container"  
+        iifname "$docker_interface" oifname "${tailscale_interface:-tailscale0}" ct state related,established accept comment "Container-Antworten an VPN"
 EOF
-        log_info "  -> VPN-Container-Integration aktiviert"
+        log_info "  -> VPN-Container-Integration aktiviert (ACCESS_MODEL=1)"
     else
         cat >> "$rules_file" <<EOF
         
-        # VPN <-> CONTAINER INTEGRATION (INAKTIV - Tailscale nicht verfügbar)
-        # iifname "tailscale0" oifname "$docker_interface" accept comment "VPN zu Docker-Container"
-        # iifname "$docker_interface" oifname "tailscale0" ct state related,established accept comment "Container-Antworten an VPN"
+        # VPN <-> CONTAINER INTEGRATION (Öffentlicher Modus - VPN optional)
+        # Bei ACCESS_MODEL=2 ist VPN optional - keine spezielle Container-VPN-Integration
 EOF
+        log_info "  -> Öffentlicher Modus - keine VPN-Container-Integration nötig"
     fi
 
     # Schließe die Tabellen-Definition
@@ -901,6 +872,7 @@ EOF
         return 1
     fi
 }
+
 ##
 # Debugging-Funktion: Zeigt den aktuellen Firewall-Status
 ##
