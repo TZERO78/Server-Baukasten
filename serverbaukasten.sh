@@ -69,6 +69,35 @@ check_root() {
     fi
 }
 
+##
+# Zeigt den Begrüßungs-Header an.
+##
+show_startup_header() {
+    local version="4.0.1"
+    local current_date=$(date '+%d.%m.%Y %H:%M:%S')
+    
+    echo
+    echo "═══════════════════════════════════════════════════════════════════════════════"
+    echo "                           🏗️  SERVER-BAUKASTEN v$version"
+    echo "═══════════════════════════════════════════════════════════════════════════════"
+    echo "  Vollautomatische Linux-Server-Härtung nach modernen Sicherheitsstandards"
+    echo
+    echo "  📅 Gestartet am: $current_date"
+    echo "  🖥️  System: $(uname -n) ($(uname -m))"
+    echo "  🐧 Kernel: $(uname -r)"
+    echo "  👤 Benutzer: $(whoami)"
+    echo
+    if [ "$TEST_MODE" = true ]; then
+        echo "  ⚡ MODUS: TEST (Schnell-Setup ohne zeitaufwändige Operationen)"
+    else
+        echo "  🚀 MODUS: PRODUKTIV (Vollständige Installation)"
+    fi
+    echo "  📋 Config: $CONFIG_FILE"
+    echo
+    echo "═══════════════════════════════════════════════════════════════════════════════"
+    echo
+}
+
 # ═══════════════════════════════════════════════════════════════════════════
 # ARGUMENT-PARSING UND VALIDIERUNG
 # ═══════════════════════════════════════════════════════════════════════════
@@ -204,7 +233,7 @@ load_modules() {
 # @param bool $1 Test-Modus (true/false).
 ##
 run_setup() {
-    local TEST_MODE="$1"
+    #TEST_MODE="$1"
     
     # ═══════════════════════════════════════════════════════════════════════════
     # PHASE 1: VORBEREITUNG & SYSTEM-GRUNDLAGEN
@@ -251,16 +280,16 @@ run_setup() {
     # ═══════════════════════════════════════════════════════════════════════════
     log_info "Phase 4/5: Dienste installieren & Firewall dynamisch erweitern..."
     
-    # STUFE 1: Netzwerk-Dienste (Tailscale VPN)
-    # -> Ruft activate_tailscale_rules() auf und erweitert die Firewall
+
+    # STUFE 1: Netzwerk-Dienste (VPN, Tailscale, Dynamic DNS)
     module_network "$TEST_MODE"
     
     # STUFE 2: Container-Dienste (Docker Engine + Management)
     if [ "${SERVER_ROLE:-2}" = "1" ]; then
-        # -> Ruft activate_docker_rules() auf und erweitert die Firewall
         module_container
         module_deploy_containers
     fi
+    
 
     # ═══════════════════════════════════════════════════════════════════════════
     # PHASE 5: ABSCHLUSS & FINALISIERUNG
@@ -301,6 +330,8 @@ cleanup_and_finalize() {
 # Haupt-Einstiegspunkt des Skripts.
 ##
 main() {
+   
+
     # 1. Basis-Validierung
     check_root
     
@@ -313,25 +344,28 @@ main() {
     
     # 4. Globale Variablen exportieren
     export SCRIPT_VERBOSE DEBUG TEST_MODE CONFIG_FILE
+
+    # 5. Zeige Header 
+    show_startup_header 
     
-    # 5. Abhängigkeiten laden
+    # 6. Abhängigkeiten laden
     load_libraries
     load_modules
     
-    # 6. Jetzt erst den echten Error-Handler setzen (rollback existiert jetzt)
+    # 7. Jetzt erst den echten Error-Handler setzen (rollback existiert jetzt)
     trap 'rollback' ERR
     
-    # 7. Begrüßung (nach Library-Load für erweiterte Funktionen)
+    # 8. Begrüßung (nach Library-Load für erweiterte Funktionen)
     log_info "Starte Server-Baukasten v4.0.1..."
     if [ "$TEST_MODE" = true ]; then
         log_warn "TEST-MODUS ist aktiviert. Zeitaufwändige Operationen werden übersprungen."
     fi
     log_info "Verwende Konfigurationsdatei: $CONFIG_FILE"
     
-    # 8. Hauptlogik ausführen
+    # 10. Hauptlogik ausführen
     run_setup
     
-    # 9. Cleanup und Abschluss
+    # 11. Cleanup und Abschluss
     cleanup_and_finalize
 }
 
