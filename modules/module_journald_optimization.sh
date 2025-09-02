@@ -1,10 +1,10 @@
 #!/bin/bash
 ################################################################################
 #
-# MODUL: KERNEL-HÄRTUNG
+# MODUL: JOURNALD-OPTIMIERUNG
 #
-# @description: Konfiguriert die Kernel-Sicherheitsparameter (sysctl)
-#               und optimiert Dienste für VPS.
+# @description: Optimiert die journald-Konfiguration für einen sparsamen
+#               Betrieb auf Servern mit wenig Speicher.
 # @author:      Markus F. (TZERO78) & KI-Assistenten
 # @repository:  https://github.com/TZERO78/Server-Baukasten
 #
@@ -13,61 +13,62 @@
 #
 ################################################################################
 
-module_kernel_hardening() {
-    log_info "🧠 MODUL: Kernel-Härtung (sysctl)"
+module_journald_optimization() {
+    log_info "📜 MODUL: Zentrale Log-Verwaltung (journald)"
     
-    backup_and_register "/etc/sysctl.conf"
+    log_info "  -> Schreibe optimierte journald-Konfigurationsdateien..."
+    mkdir -p /etc/systemd/journald.conf.d
     
-    log_info "  -> Schreibe Konfiguration für Basis-Sicherheitsparameter..."
-    cat > /etc/sysctl.d/99-baukasten-hardening.conf << 'EOF'
-# Basis Kernel-Härtung
-net.ipv4.conf.default.rp_filter=1
-net.ipv4.conf.all.rp_filter=1
-net.ipv4.tcp_syncookies=1
-net.ipv4.conf.all.accept_redirects=0
-net.ipv6.conf.all.accept_redirects=0
-net.ipv4.icmp_echo_ignore_broadcasts=1
-net.ipv4.conf.all.log_martians=1
-net.ipv6.conf.default.use_tempaddr=2
-# Explizites Aktivieren von IP-Forwarding für IPv4 und IPv6.
-net.ipv4.ip_forward=1
-net.ipv6.conf.all.forwarding=1
+    backup_and_register "/etc/systemd/journald.conf"
+    
+    # Allgemeine Optimierungen
+    cat > /etc/systemd/journald.conf.d/99-baukasten-optimization.conf <<EOF
+# Optimierte journald-Konfiguration für Server-Baukasten
+[Journal]
+Storage=persistent
+Compress=yes
+SystemMaxUse=250M
+RuntimeMaxUse=50M
+MaxRetentionSec=3week
+SystemMaxFileSize=25M
+SyncIntervalSec=60s
+ForwardToSyslog=no
+ForwardToWall=no
+RateLimitIntervalSec=60s
+RateLimitBurst=10000
 EOF
- 
-    log_info "  -> Schreibe Konfiguration für erweiterten DDoS-Schutz & VPS-Optimierung..."
-    cat > /etc/sysctl.d/98-baukasten-advanced-hardening.conf << 'EOF'
-# Erweiterte Kernel-Parameter für DDoS-Schutz & Stabilität
-net.ipv4.tcp_fin_timeout=30
-net.ipv4.tcp_keepalive_time=1800
-net.ipv4.tcp_max_syn_backlog=8192
-net.netfilter.nf_conntrack_max=524288
-net.ipv6.conf.all.accept_ra=0
-net.ipv6.conf.default.accept_ra=0
-vm.swappiness=10
-vm.dirty_ratio=15
-net.core.rmem_max=16777216
-net.core.wmem_max=16777216
-EOF
-
-    run_with_spinner "Wende neue Kernel-Parameter an..." "sysctl --system"
     
-    log_info "  -> Verifiziere kritische Kernel-Parameter..."
-    if [[ $(sysctl -n net.ipv4.ip_forward) -eq 1 ]] && [[ $(sysctl -n net.ipv6.conf.all.forwarding) -eq 1 ]]; then
-        log_ok "IP-Forwarding für IPv4 und IPv6 ist erfolgreich aktiviert."
+    # Längere Aufbewahrung für sicherheitskritische Logs
+    cat > /etc/systemd/journald.conf.d/10-security-logging.conf <<EOF
+# Längere Aufbewahrung für Security-Logs (SSH, CrowdSec, AIDE etc.)
+[Journal]
+MaxRetentionSec=12week
+EOF
+    
+    run_with_spinner "Aktiviere neue journald-Konfiguration..." "systemctl restart systemd-journald"
+    
+    log_info "  -> Verifiziere journald-Status..."
+    if systemctl is-active --quiet systemd-journald; then
+        local journal_size
+        journal_size=$(journalctl --disk-usage 2>/dev/null | grep -o '[0-9.]*[KMGT]B' || echo "Unbekannt")
+        log_info "     - Aktuelle Journal-Größe: $journal_size"
+        
+        local boot_count
+        boot_count=$(journalctl --list-boots --no-pager 2>/dev/null | wc -l || echo "Unbekannt")
+        log_info "     - Verfügbare Boot-Logs: $boot_count"
+        
+        log_ok "journald erfolgreich optimiert und aktiv."
     else
-        log_error "IP-Forwarding konnte nicht aktiviert werden! NAT für Docker/VPN wird nicht funktionieren."
-        # return 1 # Optional: Harter Abbruch, wenn Forwarding kritisch ist
+        log_error "journald konnte nicht neu gestartet werden!"
+        return 1
     fi
-
-    log_info "  -> Deaktiviere unnötige Dienste (VPS-optimiert)..."
-    local services_to_disable=("bluetooth" "cups" "avahi-daemon" "ModemManager" "wpa_supplicant")
-    for service in "${services_to_disable[@]}"; do
-        if systemctl list-units --full -all | grep -q "$service.service"; then
-            run_with_spinner "Deaktiviere Dienst '$service'..." "systemctl disable --now '$service'"
-        else
-            log_debug "Dienst '$service' nicht gefunden, wird übersprungen."
-        fi
-    done
     
-    log_ok "Modul Kernel-Härtung erfolgreich abgeschlossen."
+    log_info "--- Nützliche journalctl-Befehle ---"
+    log_info "  Live-Logs: journalctl -f"
+    log_info "  Baukasten-Logs: journalctl -t server-baukasten"
+    log_info "  SSH-Logs: journalctl -u ssh"
+    log_info "  Journal-Größe: journalctl --disk-usage"
+    log_info "------------------------------------"
+    
+    log_ok "Zentrale Log-Verwaltung via journald erfolgreich konfiguriert."
 }
