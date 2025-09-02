@@ -15,7 +15,7 @@
 # ═══════════════════════════════════════════════════════════════════════════
 # SCRIPT-INFORMATIONEN
 # ═══════════════════════════════════════════════════════════════════════════
-readonly SCRIPT_VERSION="4.0.1"
+readonly SCRIPT_VERSION="5.0.0"
 readonly SCRIPT_NAME="Server-Baukasten"
 readonly SCRIPT_AUTHOR="Markus F. (TZERO78)"
 
