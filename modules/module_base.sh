@@ -58,7 +58,7 @@ module_base() {
     fi
     log_warn "Temporäre NOPASSWD sudo-Rechte für '$ADMIN_USER' aktiviert (werden am Ende entfernt)."
 
-    # --- Phase 3/7: Kern-Pakete ---
+# --- Phase 3/7: Kern-Pakete ---
     log_info "  -> 3/7: Installiere Kern-Pakete..."
     export DEBIAN_FRONTEND=noninteractive
     readonly APT_OPTIONS="-y -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold"
@@ -69,11 +69,11 @@ module_base() {
     packages_to_install+=("aide" "rkhunter" "apparmor" "apparmor-utils" "libipc-system-simple-perl") # Security
     
     if [ "${ENABLE_GEOIP_BLOCKING:-nein}" = "ja" ]; then
-        log_info "  -> Füge GeoIP-Pakete zur Installationsliste hinzu..."
+        log_info "     -> Füge GeoIP-Pakete zur Installationsliste hinzu..."
         packages_to_install+=("ipset" "geoip-database" "geoip-bin")
     fi
     if [ "$ENABLE_SYSTEM_MAIL" = "ja" ]; then
-        log_info "  -> Füge Mail-Pakete zur Installationsliste hinzu..."
+        log_info "     -> Füge Mail-Pakete zur Installationsliste hinzu..."
         echo "postfix postfix/main_mailer_type select No configuration" | debconf-set-selections
         packages_to_install+=("msmtp" "msmtp-mta" "mailutils")
     fi
@@ -83,6 +83,20 @@ module_base() {
     if ! run_with_spinner "Installiere zusätzliche AppArmor-Profile..." "timeout 60 apt-get install $APT_OPTIONS apparmor-profiles-extra"; then
         log_warn "Installation der AppArmor-Profile übersprungen (Timeout)."
     fi
+
+    # --- Moderne yq-Version installieren (Go-basiert) ---
+    log_info "     -> Installiere yq (YAML-Processor)..."
+    
+    # Entferne alte Python-Version falls vorhanden
+    pip3 uninstall -y yq 2>/dev/null || true
+    
+    # Installiere Go-Version
+    if run_with_spinner "Lade yq..." "wget -q https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64 -O /usr/local/bin/yq && chmod +x /usr/local/bin/yq"; then
+        log_ok "yq installiert"
+    else
+        log_warn "yq-Installation fehlgeschlagen"
+    fi
+
 
     # --- Phase 4/7: Mail-System Konfiguration ---
     if [ "$ENABLE_SYSTEM_MAIL" = "ja" ]; then
@@ -107,7 +121,9 @@ module_base() {
     # --- Phase 6/7: Docker-Setup (falls Container-Server) ---
     if [ "$SERVER_ROLE" = "1" ]; then
         log_info "  -> 6/7: Installiere Docker-Engine..."
-        
+        # Konfiguriere iptables-nft Backend für Docker-Kompatibilität
+        setup_iptables_nft_backend
+      
         install -m 0755 -d /etc/apt/keyrings
         if [ ! -f /etc/apt/keyrings/docker.gpg ]; then
             run_with_spinner "Füge Docker GPG-Schlüssel hinzu..." \
@@ -128,8 +144,7 @@ module_base() {
         
         systemctl disable --now docker >/dev/null 2>&1 || true
         log_info "Docker-Engine installiert (Service wird später konfiguriert)."
-        # Konfiguriere iptables-nft Backend für Docker-Kompatibilität
-        setup_iptables_nft_backend
+    
     else
         log_info "  -> 6/7: Docker-Setup übersprungen (Einfacher Server)."
     fi
