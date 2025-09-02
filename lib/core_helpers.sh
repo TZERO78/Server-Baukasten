@@ -20,47 +20,74 @@
 ################################################################################
 
 ##
-# Prüft, ob der Kernel IPv6-NAT (MASQUERADE) unterstützt
-# 
-# Führt verschiedene Tests durch um festzustellen ob IPv6-NAT verfügbar ist:
-# 1. Kernel-Config-Datei prüfen (falls vorhanden)
-# 2. Kernel-Modul verfügbar und ladbar
- # @returns {string} "true" wenn IPv6-NAT unterstützt wird, "false" andernfalls
- ##
-##
-# Prüft, ob der Kernel IPv6-NAT (MASQUERADE/DNAT) WIRKLICH unterstützt.
-# @returns {string} "true" wenn IPv6-NAT unterstützt wird, "false" andernfalls
+# Prüft, ob der Kernel IPv6-NAT unterstützt (mit praktischem Test)
+# @return string "true" oder "false"
 ##
 check_ipv6_nat_kernel() {
-    # Test 1 & 2 bleiben gleich... (Kernel-Config & modprobe)
+    log_debug "IPv6-NAT: Starte umfassende Kernel-Support-Prüfung..."
+    
+    # TEST 1: Kernel-Konfiguration prüfen
     local kconfig="/boot/config-$(uname -r)"
-    if [ -f "$kconfig" ] && grep -q 'CONFIG_NF_NAT_MASQUERADE_IPV6=y' "$kconfig"; then
-        log_debug "IPv6-NAT: Kernel-Config sagt 'ja'."
-        echo true; return
-    fi
-    if modinfo ip6t_MASQUERADE &>/dev/null && modprobe ip6t_MASQUERADE 2>/dev/null; then
-        log_debug "IPv6-NAT: Modul ip6t_MASQUERADE ist ladbar."
+    if [ -f "$kconfig" ] && grep -q 'CONFIG_NF_NAT_MASQUERADE_IPV6=y\|CONFIG_IP6_NF_TARGET_MASQUERADE=y' "$kconfig"; then
+        log_debug "IPv6-NAT: Kernel-Config zeigt Support (CONFIG gefunden)."
     else
-        log_debug "IPv6-NAT: Modul ip6t_MASQUERADE nicht gefunden/ladbar."
-        echo false; return
+        log_debug "IPv6-NAT: Kernel-Config zeigt keinen expliziten Support."
     fi
     
-    # --- NEU: Test 3: Der praktische Versuch ---
-    # Wir versuchen, eine harmlose, temporäre Regel zu erstellen.
-    # Dies ist der ultimative Test, ob die iptables-nft-Brücke funktioniert.
-    log_debug "IPv6-NAT: Führe praktischen Test mit ip6tables durch..."
+    # TEST 2: Modul-Verfügbarkeit prüfen
+    if modinfo ip6t_MASQUERADE &>/dev/null; then
+        log_debug "IPv6-NAT: Modul ip6t_MASQUERADE ist verfügbar."
+        if modprobe ip6t_MASQUERADE 2>/dev/null; then
+            log_debug "IPv6-NAT: Modul ip6t_MASQUERADE erfolgreich geladen."
+        else
+            log_debug "IPv6-NAT: Modul ip6t_MASQUERADE konnte nicht geladen werden."
+        fi
+    else
+        log_debug "IPv6-NAT: Modul ip6t_MASQUERADE nicht gefunden."
+    fi
     
-    # Wir benutzen die OUTPUT-Kette, da sie fast immer existiert und sicher ist.
+    # TEST 3: Praktischer Funktions-Test (KRITISCH!)
+    # Dies ist der ultimative Test - wenn das funktioniert, ist IPv6-NAT definitiv verfügbar
+    log_debug "IPv6-NAT: Führe praktischen Funktionstest durch..."
+    
+    # Verwende harmlose Test-Regel in OUTPUT-Chain (sicher, kollidiert mit nichts)
+    local test_successful=false
+    local cleanup_needed=false
+    
+    # Versuche Test-Regel zu erstellen
     if ip6tables -t nat -A OUTPUT -p tcp --dport 59999 -j DNAT --to-destination [::1]:59999 >/dev/null 2>&1; then
-        # ERFOLG! Wenn das klappt, sofort wieder aufräumen!
-        ip6tables -t nat -D OUTPUT -p tcp --dport 59999 -j DNAT --to-destination [::1]:59999 >/dev/null 2>&1
-        log_debug "IPv6-NAT: Praktischer Test erfolgreich."
-        echo true; return
+        log_debug "IPv6-NAT: Test-Regel erfolgreich erstellt."
+        test_successful=true
+        cleanup_needed=true
+    else
+        log_debug "IPv6-NAT: Test-Regel konnte nicht erstellt werden."
+        # Prüfe ob es ein ip6tables-Problem oder ein NAT-Problem ist
+        if ip6tables -t filter -L OUTPUT >/dev/null 2>&1; then
+            log_debug "IPv6-NAT: ip6tables funktioniert, aber NAT-Tabelle nicht verfügbar."
+        else
+            log_debug "IPv6-NAT: Grundlegendes ip6tables-Problem."
+        fi
     fi
-
-    # Wenn wir hier ankommen, haben alle Tests versagt.
-    log_warn "IPv6-NAT: Praktischer Test mit ip6tables ist fehlgeschlagen."
-    echo false
+    
+    # Cleanup der Test-Regel (falls erfolgreich erstellt)
+    if [ "$cleanup_needed" = true ]; then
+        if ip6tables -t nat -D OUTPUT -p tcp --dport 59999 -j DNAT --to-destination [::1]:59999 >/dev/null 2>&1; then
+            log_debug "IPv6-NAT: Test-Regel erfolgreich entfernt."
+        else
+            log_warn "IPv6-NAT: Test-Regel konnte nicht entfernt werden (nicht kritisch)."
+            # Versuche Fallback-Cleanup
+            ip6tables -t nat -F OUTPUT >/dev/null 2>&1 || true
+        fi
+    fi
+    
+    # Endergebnis basierend auf praktischem Test
+    if [ "$test_successful" = true ]; then
+        log_debug "IPv6-NAT: Praktischer Test erfolgreich - IPv6-NAT ist voll funktional."
+        echo "true"
+    else
+        log_debug "IPv6-NAT: Praktischer Test fehlgeschlagen - IPv6-NAT nicht verfügbar."
+        echo "false"
+    fi
 }
 
 ##
