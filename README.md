@@ -90,6 +90,8 @@ Server-Baukasten v5.0/
 ├── install.sh                    # 🆕 Automatische Installation aller Komponenten
 ├── serverbaukasten.sh            # Hauptskript (Orchestrator)
 ├── standard.conf                 # Konfigurationsvorlage
+├── LICENSE                       # MIT-Lizenz
+├── README.md                     # Diese Dokumentation
 ├── lib/                          # 🆕 Kern-Bibliotheken (modular)
 │   ├── core_helpers.sh           # Logging, sudo-Verwaltung, Validierung
 │   ├── ui_helpers.sh             # Benutzeroberfläche & Zusammenfassung
@@ -109,6 +111,9 @@ Server-Baukasten v5.0/
 │   ├── module_mail_setup.sh        # E-Mail-Benachrichtigungen
 │   ├── module_journald_optimization.sh # Log-Optimierung
 │   └── module_verify_setup.sh      # 🆕 Umfassende System-Verifikation
+├── conf/                         # 🆕 Konfigurationsvorlagen für Services
+│   ├── aide.conf.template        # AIDE Datei-Integritätsprüfung
+│   └── rkhunter.conf.template     # RKHunter Rootkit-Scanner
 └── components/                   # Automatisch heruntergeladene Tools
     ├── geoip-manager             # 🆕 GeoIP-Verwaltungstool
     └── update-geoip-sets         # 🆕 Automatische IP-Listen-Updates
