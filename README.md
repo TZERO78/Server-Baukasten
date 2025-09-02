@@ -35,7 +35,9 @@ Bewusst als simples Bash-Script entwickelt - transparent, nachvollziehbar, ohne 
 **3. Reproduzierbares Setup**
 Server-Konfiguration über Config-File. Ermöglicht identische, gehärtete Server-Setups für Experimente oder Disaster Recovery.
 
-**Was es NICHT ist:** Eine vollautomatische Enterprise-Lösung. Es schafft das sichere Fundament - für spezifische Services musst du selbst Hand anlegen.
+**Was es NICHT ist:** Eine vollautomatische Enterprise-Lösung. Es schafft das sichere Fundament - für spezifische Services musst du selbst Hand anlegen. Du kannst das Script jederzeit auf deine Bedürfnisse anpassen.
+
+**Hinweis:** Das Script ist nicht perfekt und hat mit Sicherheit an der einen oder anderen Stelle noch kleine Bugs, die ich natürlich versuche zu beheben! Feedback und Bug-Reports sind immer willkommen.
 
 ---
 
@@ -47,15 +49,15 @@ Server-Konfiguration über Config-File. Ermöglicht identische, gehärtete Serve
 - **Module-Framework**: Jedes Setup-Feature als eigenständiges Modul in `modules/`
 - **Automatischer Download**: `install.sh` lädt alle Komponenten direkt von GitHub
 
-### 🐳 **Docker-Integration revolutioniert**
+### 🐳 **Docker-Integration überarbeitet**
 - **iptables-nft Backend**: Stabile Koexistenz zwischen Docker und NFTables
-- **Systemd-Abhängigkeiten**: Docker startet garantiert nach der Firewall
+- **Systemd-Abhängigkeiten**: Docker startet nach der Firewall
 - **Modulare Container-Regeln**: Separate NFTables-Datei für Docker-Traffic
 
 ### 🛡️ **CrowdSec Set-basierte Integration**
 - **Keine Tabellen-Konflikte**: CrowdSec nutzt vordefinierte Sets statt eigene Tabellen
 - **Modulare NFTables-Integration**: Separate CrowdSec-Konfigurationsdatei
-- **Eigene systemd-Units**: Health-Checks und Neustart-Logik völlig neu entwickelt
+- **Eigene systemd-Units**: Health-Checks und Neustart-Logik
 
 ### 🌍 **Erweiterte GeoIP-Verwaltung**
 - **Management-Tool**: `geoip-manager` für einfache Verwaltung
@@ -207,12 +209,12 @@ sudo ./serverbaukasten.sh -t -c mein-server.conf
 
 ### **Layer 3: GeoIP-Blocking (Erweitert)**
 - **Management-Tool**: `geoip-manager status|update|country add/remove`
-- **Statistik-basiert**: 60-85% weniger Angriffe je nach Konfiguration
+- **Statistisch basiert**: 60-85% weniger Angriffe je nach Konfiguration
 - **Heimatland-Schutz**: Automatische Konflikt-Auflösung
 - **Set-Performance**: NFTables-Sets statt Einzelregeln
 
 ### **Layer 4: Tailscale VPN (Zero Trust)**
-- **Unsichtbarer Server**: Komplette Abschottung vom öffentlichen Internet
+- **Privater Zugang**: VPN-only Modus schließt alle öffentlichen Ports
 - **Mesh-Netzwerk**: Sichere Verbindung zwischen allen Geräten
 - **Subnet-Routing**: Server als Gateway für lokale Netze (IPv4)
 - **IPv6-Kompatibilität**: Automatische Erkennung von VPS-IPv6-Limitationen
@@ -228,13 +230,13 @@ sudo ./serverbaukasten.sh -t -c mein-server.conf
 
 ## 🐳 **Docker-Integration v5.0**
 
-### **Revolutionierte Docker-Unterstützung**
+### **Verbesserte Docker-Unterstützung**
 
 **Problem in v4.x:** Docker und NFTables-Konflikte führten zu instabilen Setups.
 
 **Lösung in v5.0:**
 1. **iptables-nft Backend**: `update-alternatives --set iptables /usr/sbin/iptables-nft`
-2. **Systemd-Abhängigkeiten**: Docker startet garantiert nach NFTables
+2. **Systemd-Abhängigkeiten**: Docker startet nach NFTables
 3. **Modulare Container-Regeln**: Separate `/etc/nftables.d/50-docker.conf`
 4. **Stabile Koexistenz**: Docker verwaltet seine Regeln, Baukasten die Sicherheit
 5. **IPv6-VPS-Kompatibilität**: Automatische Erkennung von NAT66-Limitationen bei Standard-VPS
@@ -294,9 +296,9 @@ geoip_allowlist_v6   # Manuelle IPv6-Ausnahmen
 ```
 
 **Vorkonfigurierte Länder-Presets:**
-- **Standard**: `CN RU KP IR` (~70% Angriffs-Reduktion)
-- **Maximal**: `CN RU KP IR BY MM SY AF IQ LY` (~85% Angriffs-Reduktion)
-- **Minimal**: `CN RU` (~60% Angriffs-Reduktion)
+- **Standard**: `CN RU KP IR` (ca. 70% Angriffs-Reduktion)
+- **Maximal**: `CN RU KP IR BY MM SY AF IQ LY` (ca. 85% Angriffs-Reduktion)
+- **Minimal**: `CN RU` (ca. 60% Angriffs-Reduktion)
 
 ---
 
