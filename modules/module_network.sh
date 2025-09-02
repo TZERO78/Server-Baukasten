@@ -228,9 +228,9 @@ setup_tailscale() {
 # Orchestriert Tailscale-Setup basierend auf ACCESS_MODEL
 ##
 module_network() {
-    local TEST_MODE="$1"
+    #TEST_MODE="$1"
     log_info "🌐 MODUL: Netzwerk-Konfiguration (Tailscale VPN)"
-    
+    log_info "DEBUG: Eingeparameter - ACCESS_MODEL='${ACCESS_MODEL:-UNSET}', TEST_MODE='$TEST_MODE'"
     # Test-Modus: Überspringe zeitaufwändiges Tailscale-Setup
     if [ "${TEST_MODE}" = true ]; then
         log_warn "TEST-MODUS: Überspringe Tailscale-Setup (simuliere erfolgreiche Verbindung)."
