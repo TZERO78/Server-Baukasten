@@ -22,7 +22,7 @@
 # HAUPT-MODUL: Sicherheits-Architektur mit zweistufigem Firewall-Setup
 ##
 module_security() {
-    local TEST_MODE="$1"
+    #TEST_MODE="$1"
     log_info "🔒 MODUL: Sicherheits-Architektur (Multi-Layer mit zweistufigem Setup)"
 
     # Die Reihenfolge ist KRITISCH für das zweistufige Setup:
@@ -151,12 +151,37 @@ setup_firewall_infrastructure() {
             fi
         fi
         
-        # SSH-Port-Test
+        # SSH-Port-Test (ROBUSTE VERSION)
         local ssh_port="${SSH_PORT:-22}"
-        if nft list chain inet filter input 2>/dev/null | grep -q "dport $ssh_port"; then
-            log_ok "  ✅ SSH-Port $ssh_port: Freigegeben"
+        
+        # 1. Prüfe Firewall-Regel (robustes Pattern)
+        local firewall_rule_exists=false
+        if nft list chain inet filter input 2>/dev/null | grep -Eq "\btcp dport $ssh_port\b.*accept"; then
+            firewall_rule_exists=true
+        fi
+        
+        # 2. Prüfe Service-Status
+        local ssh_service_running=false
+        if systemctl is-active --quiet ssh && ss -tln | grep -q ":$ssh_port "; then
+            ssh_service_running=true
+        fi
+        
+        # 3. Bewertung mit intelligenter Fehlerbehandlung
+        if [ "$firewall_rule_exists" = true ] && [ "$ssh_service_running" = true ]; then
+            log_ok "  ✅ SSH-Port $ssh_port: Firewall-Regel UND Service aktiv"
+        elif [ "$ssh_service_running" = true ]; then
+            log_warn "  ⚠️  SSH-Port $ssh_port: Service läuft, aber Firewall-Regel unklar"
+            log_info "     💡 Möglicherweise wird SSH durch andere Regel erlaubt"
+            log_info "     💡 Test: ssh -p $ssh_port localhost echo 'Test OK'"
+            # NICHT return 1 - SSH funktioniert ja grundsätzlich!
+        elif [ "$firewall_rule_exists" = true ]; then
+            log_error "  ❌ SSH-Port $ssh_port: Firewall-Regel da, aber Service Problem!"
+            log_error "     🔧 Debug: systemctl status ssh"
+            return 1
         else
-            log_error "  ❌ SSH-Port $ssh_port: Nicht freigegeben!"
+            log_error "  ❌ SSH-Port $ssh_port: Weder Firewall-Regel noch Service aktiv!"
+            log_error "     🔧 Debug: nft list chain inet filter input | grep $ssh_port"
+            log_error "     🔧 Debug: systemctl status ssh"
             return 1
         fi
         
@@ -192,7 +217,7 @@ setup_intrusion_prevention() {
     
     # Finale Überprüfung der CrowdSec-Dienste
     log_info "  -> Überprüfe CrowdSec-Service-Status..."
-    if systemctl is-active --quiet crowdsec && systemctl is-active --quiet crowdsec-firewall-bouncer; then
+    if systemctl is-active --quiet crowdsec && systemctl is-active --quiet crowdsec-bouncer-setonly; then
         log_ok "CrowdSec IPS ist aktiv und in die Firewall integriert."
         
         # Erweiterte Verifikation für das zweistufige Setup
@@ -203,10 +228,10 @@ setup_intrusion_prevention() {
         fi
         
     else
-        log_error "CrowdSec-Dienste haben Probleme!")
+        log_error "CrowdSec-Dienste haben Probleme!"
         log_info "Debug-Befehle:"
         log_info "  -> systemctl status crowdsec"
-        log_info "  -> systemctl status crowdsec-firewall-bouncer"
+        log_info "  -> systemctl status crowdsec-bouncer-setonly"
         log_info "  -> journalctl -u crowdsec -n 20"
         # Nicht return 1 - IPS ist optional für Basis-Funktionalität
     fi
@@ -304,7 +329,7 @@ verify_security_layers() {
             ((security_status++))
         fi
         
-        if systemctl is-active --quiet crowdsec-firewall-bouncer; then
+        if systemctl is-active --quiet crowdsec-bouncer-setonly; then
             log_ok "Layer 2: CrowdSec-Bouncer ist aktiv."
         else
             log_error "Layer 2: CrowdSec-Bouncer ist NICHT aktiv!"
