@@ -20,6 +20,50 @@
 ################################################################################
 
 ##
+# Prüft, ob der Kernel IPv6-NAT (MASQUERADE) unterstützt
+# 
+# Führt verschiedene Tests durch um festzustellen ob IPv6-NAT verfügbar ist:
+# 1. Kernel-Config-Datei prüfen (falls vorhanden)
+# 2. Kernel-Modul verfügbar und ladbar
+ # @returns {string} "true" wenn IPv6-NAT unterstützt wird, "false" andernfalls
+ ##
+##
+# Prüft, ob der Kernel IPv6-NAT (MASQUERADE/DNAT) WIRKLICH unterstützt.
+# @returns {string} "true" wenn IPv6-NAT unterstützt wird, "false" andernfalls
+##
+check_ipv6_nat_kernel() {
+    # Test 1 & 2 bleiben gleich... (Kernel-Config & modprobe)
+    local kconfig="/boot/config-$(uname -r)"
+    if [ -f "$kconfig" ] && grep -q 'CONFIG_NF_NAT_MASQUERADE_IPV6=y' "$kconfig"; then
+        log_debug "IPv6-NAT: Kernel-Config sagt 'ja'."
+        echo true; return
+    fi
+    if modinfo ip6t_MASQUERADE &>/dev/null && modprobe ip6t_MASQUERADE 2>/dev/null; then
+        log_debug "IPv6-NAT: Modul ip6t_MASQUERADE ist ladbar."
+    else
+        log_debug "IPv6-NAT: Modul ip6t_MASQUERADE nicht gefunden/ladbar."
+        echo false; return
+    fi
+    
+    # --- NEU: Test 3: Der praktische Versuch ---
+    # Wir versuchen, eine harmlose, temporäre Regel zu erstellen.
+    # Dies ist der ultimative Test, ob die iptables-nft-Brücke funktioniert.
+    log_debug "IPv6-NAT: Führe praktischen Test mit ip6tables durch..."
+    
+    # Wir benutzen die OUTPUT-Kette, da sie fast immer existiert und sicher ist.
+    if ip6tables -t nat -A OUTPUT -p tcp --dport 59999 -j DNAT --to-destination [::1]:59999 >/dev/null 2>&1; then
+        # ERFOLG! Wenn das klappt, sofort wieder aufräumen!
+        ip6tables -t nat -D OUTPUT -p tcp --dport 59999 -j DNAT --to-destination [::1]:59999 >/dev/null 2>&1
+        log_debug "IPv6-NAT: Praktischer Test erfolgreich."
+        echo true; return
+    fi
+
+    # Wenn wir hier ankommen, haben alle Tests versagt.
+    log_warn "IPv6-NAT: Praktischer Test mit ip6tables ist fehlgeschlagen."
+    echo false
+}
+
+##
 # Führt einen Befehl aus. Zeigt im Normalmodus einen Spinner und bei Fehlern die
 # Fehlermeldung an. Im Verbose-Modus wird die gesamte Ausgabe live angezeigt.
 # @param string $1 Der Text, der neben dem Spinner angezeigt wird.
