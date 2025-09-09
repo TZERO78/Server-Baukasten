@@ -47,7 +47,9 @@ module_geoip() {
     configure_geoip_nftables_rules
     initialize_geoip_system
     
-
+    # Verifikation
+    verify_geoip_installation
+    
     log_ok "Modul GeoIP-Blocking erfolgreich abgeschlossen."
 }
 
@@ -135,10 +137,11 @@ configure_geoip_nftables_rules() {
 # GeoIP-System initialisieren
 ##
 initialize_geoip_system() {
-    log_info "  -> Starte GeoIP-Timer und führe initiales Update aus..."
+    log_info "  -> Aktiviere GeoIP-Services und führe initiales Update aus..."
     
-    # Timer aktivieren
+    # Services aktivieren
     systemctl daemon-reload
+    systemctl enable geoip-boot-restore.service
     systemctl enable --now geoip-update.timer
     
     # Erstes Update ausführen um Sets zu befüllen
@@ -146,10 +149,10 @@ initialize_geoip_system() {
     if /usr/local/bin/update-geoip-sets; then
         log_ok "Erstes GeoIP-Update erfolgreich. Die Sets sind jetzt befüllt."
     else
-        log_warn "Erstes GeoIP-Update fehlgeschlagen. Sets sind noch leer. Timer wird es erneut versuchen."
+        log_warn "Erstes GeoIP-Update fehlgeschlagen. Boot-Service wird es beim nächsten Neustart versuchen."
     fi
     
-    log_ok "GeoIP-System erfolgreich initialisiert."
+    log_ok "GeoIP-System erfolgreich initialisiert (Boot-Restore + Timer aktiv)."
 }
 
 ################################################################################
