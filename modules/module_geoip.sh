@@ -78,12 +78,31 @@ create_geoip_config_files() {
 }
 
 ##
-# GeoIP systemd-Timer erstellen
+# GeoIP systemd-Services erstellen
 ##
 create_geoip_systemd_timer() {
-    log_info "  -> Erstelle systemd-Timer für wöchentliches GeoIP-Update..."
+    log_info "  -> Erstelle systemd-Services für GeoIP-Management..."
     
-    # systemd-Service
+    # Boot-Service für automatisches Laden nach Reboot
+    cat > /etc/systemd/system/geoip-boot-restore.service << 'EOF'
+[Unit]
+Description=Restore GeoIP Sets after boot
+After=network-online.target nftables.service
+Wants=network-online.target
+Before=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/update-geoip-sets
+User=root
+TimeoutSec=300
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
+EOF
+    
+    # Update-Service für wöchentliche Updates
     cat > /etc/systemd/system/geoip-update.service << 'EOF'
 [Unit]
 Description=Update GeoIP block lists (Set-based)
@@ -96,13 +115,12 @@ ExecStart=/usr/local/bin/update-geoip-sets
 User=root
 EOF
     
-    # systemd-Timer mit wöchentlichem Zeitplan
+    # Wöchentlicher Update-Timer
     cat > /etc/systemd/system/geoip-update.timer << 'EOF'
 [Unit]
 Description=Run GeoIP update weekly
 
 [Timer]
-# Wöchentlich - guter Kompromiss
 OnCalendar=Sun *-*-* 02:00:00
 RandomizedDelaySec=12h
 Persistent=true
@@ -111,7 +129,7 @@ Persistent=true
 WantedBy=timers.target
 EOF
     
-    log_ok "GeoIP-Update-Timer konfiguriert (wöchentlich sonntags)."
+    log_ok "GeoIP-Services konfiguriert (Boot-Restore + wöchentliche Updates)."
 }
 
 ##
