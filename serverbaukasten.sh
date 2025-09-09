@@ -274,7 +274,8 @@ run_setup() {
     # - CrowdSec IPS
     # - AIDE & RKHunter (falls nicht Test-Modus)
     module_security "$TEST_MODE"
-
+    # GeoIP-Blocking-System konfigurieren (falls aktiviert)
+    module_geoip
     # ═══════════════════════════════════════════════════════════════════════════
     # PHASE 4: DIENSTE & DYNAMISCHE FIREWALL-ERWEITERUNG
     # ═══════════════════════════════════════════════════════════════════════════
