@@ -47,9 +47,7 @@ module_geoip() {
     configure_geoip_nftables_rules
     initialize_geoip_system
     
-    # Verifikation
-    verify_geoip_installation
-    
+
     log_ok "Modul GeoIP-Blocking erfolgreich abgeschlossen."
 }
 
