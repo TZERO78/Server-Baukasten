@@ -90,22 +90,23 @@ deploy_portainer_container() {
     cleanup_output=$(docker stop portainer 2>&1 || true)
     [ -n "$cleanup_output" ] && log_debug "Portainer gestoppt: $cleanup_output"
     
-    cleanup_output=$(docker rm portainer 2>&1 || true)  
+    cleanup_output=$(docker rm portainer 2>&1 || true)
     [ -n "$cleanup_output" ] && log_debug "Portainer entfernt: $cleanup_output"
     
-    # --- Port-Bindung basierend auf Zugriffs-Modell bestimmen ---
-    local portainer_bind=""
+    # --- KORRIGIERT: Immer localhost verwenden für Stabilität ---
+    # Problem: Tailscale-IPs sind nach Reboot oft nicht sofort verfügbar
+    # Lösung: Binding auf 127.0.0.1 funktioniert immer
+    local portainer_bind="127.0.0.1:9000:9000"
     local access_info=""
     
     if [ "${ACCESS_MODEL:-2}" = "1" ] && [ "${TAILSCALE_ACTIVE:-false}" = "true" ]; then
-        # VPN-Modell: Binde nur an Tailscale oder localhost
+        # VPN-Modell: Zugang über Tailscale-Netz möglich
         local tailscale_ip="${TAILSCALE_IP:-127.0.0.1}"
-        portainer_bind="${tailscale_ip}:9443:9443 -p ${tailscale_ip}:8000:8000"
-        access_info="VPN-only (https://${tailscale_ip}:9443)"
+        access_info="VPN-Zugang: http://${tailscale_ip}:9000 (über Tailscale-Netz)"
     else
-        # Öffentliches Modell: Binde an alle Interfaces
-        portainer_bind="9443:9443 -p 8000:8000"
-        access_info="Öffentlich (https://$(hostname -I | awk '{print $1}'):9443)"
+        # Öffentliches Modell: Localhost-only für Sicherheit
+        access_info="Localhost-only: http://127.0.0.1:9000"
+        log_info "     -> Für externen Zugang: SSH-Tunnel oder Reverse-Proxy konfigurieren"
     fi
     
     log_info "     -> Port-Bindung: $access_info"
@@ -113,14 +114,14 @@ deploy_portainer_container() {
     # --- Portainer-Container starten ---
     local portainer_cmd="docker run -d \
         --name=portainer \
-        --restart=always \
+        --restart=unless-stopped \
         -p $portainer_bind \
         -v /var/run/docker.sock:/var/run/docker.sock \
         -v portainer_data:/data \
         --label='service=portainer' \
         --label='managed-by=server-baukasten' \
         portainer/portainer-ce:latest"
-
+    
     if run_with_spinner "Starte Portainer-Container (Image-Pull kann dauern)..." "$portainer_cmd"; then
         log_ok "Portainer erfolgreich gestartet."
         
@@ -135,10 +136,13 @@ deploy_portainer_container() {
             
             # Erste Setup-Hinweise
             log_info "  📋 Erste Anmeldung: Admin-Account in Web-UI erstellen"
+            log_info "  ⏰ Timeout: 5 Minuten nach Start für Sicherheit"
+            
+            # SSH-Tunnel-Anleitung für externen Zugang
             if [ "${ACCESS_MODEL:-2}" = "2" ]; then
-                log_warn "  🔒 SICHERHEIT: Portainer ist öffentlich erreichbar!"
-                log_info "     -> Starkes Admin-Passwort wählen"
-                log_info "     -> Eventuell Firewall-Regel hinzufügen für Port 9443"
+                log_info "  🔧 SSH-Tunnel für externen Zugang:"
+                log_info "     ssh -L 9000:127.0.0.1:9000 admin@$(hostname -I | awk '{print $1}') -p ${SSH_PORT:-22}"
+                log_info "     Dann: http://localhost:9000 im lokalen Browser"
             fi
         else
             log_error "  ❌ Container-Status: $container_status"
@@ -150,6 +154,7 @@ deploy_portainer_container() {
         log_info "Debug-Befehle:"
         log_info "  -> docker logs portainer"
         log_info "  -> docker inspect portainer"
+        return 1
     fi
 }
 
