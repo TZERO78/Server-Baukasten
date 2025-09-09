@@ -73,7 +73,7 @@ check_root() {
 # Zeigt den Begrüßungs-Header an.
 ##
 show_startup_header() {
-    local version="4.0.1"
+    local version="5.1"
     local current_date=$(date '+%d.%m.%Y %H:%M:%S')
     
     echo
@@ -357,7 +357,7 @@ main() {
     trap 'rollback' ERR
     
     # 8. Begrüßung (nach Library-Load für erweiterte Funktionen)
-    log_info "Starte Server-Baukasten v4.0.1..."
+    log_info "Starte Server-Baukasten v5.1..."
     if [ "$TEST_MODE" = true ]; then
         log_warn "TEST-MODUS ist aktiviert. Zeitaufwändige Operationen werden übersprungen."
     fi
