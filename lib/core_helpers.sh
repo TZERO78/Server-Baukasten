@@ -184,7 +184,6 @@ detect_os() {
 
 ##
 ## Führt Vorab-Prüfungen durch und installiert fehlende Pakete automatisch.
-## Bereinigt auch Windows-Zeilenumbrüche in allen Projektdateien.
 ## @return int 0=Erfolg, 1=Fehler
 ##
 pre_flight_checks() {
@@ -259,12 +258,7 @@ pre_flight_checks() {
     else
         log_ok "✅ Alle System-Mindestvoraussetzungen sind erfüllt."
     fi
-<<<<<<< HEAD
-=======
-    
-    # Windows-Zeilenumbrüche bereinigen
-    # fix_line_endings_in_project
->>>>>>> 02c6fb8ed3f4d16bd6254528ccd9c1f742ce95c9
+   return 0
 }
 
 ##
