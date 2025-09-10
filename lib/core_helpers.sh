@@ -183,8 +183,8 @@ detect_os() {
 }
 
 ##
-## Führt Vorab-Prüfungen durch, um sicherzustellen, dass alle benötigten Befehle vorhanden sind.
-## Bricht das Skript mit einer Fehlermeldung ab, wenn kritische Befehle fehlen.
+## Führt Vorab-Prüfungen durch und installiert fehlende Pakete automatisch.
+## Bereinigt auch Windows-Zeilenumbrüche in allen Projektdateien.
 ## @return int 0=Erfolg, 1=Fehler
 ##
 pre_flight_checks() {
@@ -194,13 +194,15 @@ pre_flight_checks() {
     declare -A cmd_to_pkg=(
         [curl]="curl"
         [wget]="wget"
-        [gpg]="gpg"
+        [gpg]="gnupg"
         [systemctl]="systemd"
         [ip]="iproute2"
         [apt-get]="apt"
         [sed]="sed"
         [envsubst]="gettext-base"
         [logger]="bsdutils"
+        [file]="file"           # Für CRLF-Detection
+        [dos2unix]="dos2unix"   # Optional für bessere Windows-Konvertierung
     )
 
     local missing_cmds=()
@@ -217,12 +219,125 @@ pre_flight_checks() {
         fi
     done
 
+    # Auto-Installation wenn Pakete fehlen
     if [ ${#missing_cmds[@]} -gt 0 ]; then
-        log_error "Fehlende Kern-Befehle: ${missing_cmds[*]}"
-        log_info "  -> Bitte installiere die folgenden Pakete: ${missing_pkgs[*]}"
-        exit 1
+        log_warn "⚠️  Fehlende Befehle erkannt: ${missing_cmds[*]}"
+        log_info "  -> Versuche automatische Installation der Pakete: ${missing_pkgs[*]}"
+        
+        # APT-Cache aktualisieren (nur wenn nötig)
+        if [ ! -f /var/cache/apt/pkgcache.bin ] || \
+           [ $(find /var/cache/apt/pkgcache.bin -mmin +60 2>/dev/null | wc -l) -gt 0 ]; then
+            log_info "  -> Aktualisiere APT-Cache..."
+            if ! apt-get update -qq 2>/dev/null; then
+                log_warn "  -> APT-Update fehlgeschlagen, prüfe APT-Quellen..."
+                fix_apt_sources_if_needed
+                apt-get update -qq
+            fi
+        fi
+        
+        # Pakete installieren
+        log_info "  -> Installiere fehlende Pakete..."
+        if DEBIAN_FRONTEND=noninteractive apt-get install -y -qq ${missing_pkgs[*]} 2>/dev/null; then
+            log_ok "✅ Fehlende Pakete wurden installiert: ${missing_pkgs[*]}"
+        else
+            log_error "❌ Installation fehlgeschlagen. Bitte manuell installieren: apt-get install ${missing_pkgs[*]}"
+            exit 1
+        fi
+        
+        # Nochmal prüfen ob alles da ist
+        local still_missing=()
+        for cmd in "${missing_cmds[@]}"; do
+            if ! command -v "$cmd" &>/dev/null; then
+                still_missing+=("$cmd")
+            fi
+        done
+        
+        if [ ${#still_missing[@]} -gt 0 ]; then
+            log_error "❌ Befehle fehlen weiterhin: ${still_missing[*]}"
+            exit 1
+        fi
     else
-        log_ok "Alle System-Mindestvoraussetzungen sind erfüllt."
+        log_ok "✅ Alle System-Mindestvoraussetzungen sind erfüllt."
+    fi
+    
+    # Windows-Zeilenumbrüche bereinigen
+    fix_line_endings_in_project
+}
+
+##
+## Repariert APT-Quellen falls nötig (für frische VPS-Installationen)
+##
+fix_apt_sources_if_needed() {
+    log_info "  -> Prüfe APT-Quellen..."
+    
+    # Test ob Basis-Pakete gefunden werden
+    if ! apt-cache search "^curl$" | grep -q curl 2>/dev/null; then
+        log_warn "  -> APT-Quellen scheinen unvollständig, repariere..."
+        
+        # Backup
+        cp /etc/apt/sources.list /etc/apt/sources.list.backup.$(date +%Y%m%d_%H%M%S) 2>/dev/null || true
+        
+        # Debian Version erkennen
+        if [ -f /etc/debian_version ]; then
+            local VERSION_ID=$(cat /etc/debian_version | cut -d. -f1)
+            local CODENAME=""
+            
+            case "$VERSION_ID" in
+                12) CODENAME="bookworm" ;;
+                13) CODENAME="trixie" ;;
+                11) CODENAME="bullseye" ;;
+                *) CODENAME="stable" ;;
+            esac
+            
+            # Neue sources.list
+            cat > /etc/apt/sources.list << EOF
+deb http://deb.debian.org/debian/ ${CODENAME} main contrib non-free non-free-firmware
+deb http://deb.debian.org/debian/ ${CODENAME}-updates main contrib non-free non-free-firmware
+deb http://security.debian.org/debian-security ${CODENAME}-security main contrib non-free non-free-firmware
+EOF
+            
+            # IONOS/Provider-spezifische Mirror-Listen entfernen
+            rm -f /etc/apt/mirrors/*.list 2>/dev/null || true
+            
+            log_ok "  -> APT-Quellen repariert für Debian ${VERSION_ID} (${CODENAME})"
+        elif [ -f /etc/lsb-release ]; then
+            # Ubuntu
+            source /etc/lsb-release
+            cat > /etc/apt/sources.list << EOF
+deb http://archive.ubuntu.com/ubuntu/ ${DISTRIB_CODENAME} main restricted universe multiverse
+deb http://archive.ubuntu.com/ubuntu/ ${DISTRIB_CODENAME}-updates main restricted universe multiverse
+deb http://security.ubuntu.com/ubuntu/ ${DISTRIB_CODENAME}-security main restricted universe multiverse
+EOF
+            log_ok "  -> APT-Quellen repariert für Ubuntu ${DISTRIB_CODENAME}"
+        fi
+    fi
+}
+
+##
+## Bereinigt Windows-Zeilenumbrüche in allen Projektdateien
+##
+fix_line_endings_in_project() {
+    log_debug "🔧 Prüfe Projektdateien auf Windows-Zeilenumbrüche..."
+    
+    local fixed_count=0
+    local dirs=("." "lib" "modules" "configs")
+    
+    for dir in "${dirs[@]}"; do
+        if [ -d "$dir" ]; then
+            while IFS= read -r -d '' file; do
+                # Prüfe ob Datei CRLF hat
+                if file "$file" 2>/dev/null | grep -q "CRLF\|with CR" || \
+                   head -1 "$file" | od -c | grep -q '\\r'; then
+                    sed -i 's/\r$//' "$file"
+                    ((fixed_count++))
+                    log_debug "  Bereinigt: $file"
+                fi
+            done < <(find "$dir" -maxdepth 1 -type f \( -name "*.sh" -o -name "*.conf" \) -print0 2>/dev/null)
+        fi
+    done
+    
+    if [ $fixed_count -gt 0 ]; then
+        log_info "✅ $fixed_count Dateien von Windows-Zeilenumbrüchen bereinigt"
     fi
 }
 
@@ -368,6 +483,7 @@ set_config_value() {
 
 ##
 # Lädt und validiert die Konfiguration aus einer Datei dynamisch.
+# Bereinigt automatisch Windows-Zeilenumbrüche (CRLF -> LF)
 # @param string $1 Pfad zur Konfigurationsdatei.
 ##
 load_config_from_file() {
@@ -376,6 +492,27 @@ load_config_from_file() {
     
     if [ ! -f "$file" ]; then
         log_error "Konfigurationsdatei nicht gefunden: $file"
+        exit 1
+    fi
+    
+    # --- NEU: Windows-Zeilenumbruch-Bereinigung ---
+    # Prüfe auf CRLF (Windows) Zeilenumbrüche
+    if file "$file" 2>/dev/null | grep -q "CRLF\|with CR" || \
+       od -c "$file" 2>/dev/null | head -1 | grep -q '\\r'; then
+        log_warn "⚠️  Windows-Zeilenumbrüche (CRLF) in Config erkannt - bereinige..."
+        # Backup erstellen
+        cp "$file" "${file}.backup.$(date +%Y%m%d_%H%M%S)"
+        # CRLF zu LF konvertieren
+        sed -i 's/\r$//' "$file"
+        # DOS-EOF-Zeichen (^Z) entfernen falls vorhanden
+        sed -i 's/\x1a$//' "$file"
+        log_ok "✅ Zeilenumbrüche bereinigt (Backup: ${file}.backup.*)"
+    fi
+    
+    # --- Syntax-Check vor dem Sourcen ---
+    if ! bash -n "$file" 2>/dev/null; then
+        log_error "Syntax-Fehler in der Konfigurationsdatei: $file"
+        log_info "  Tipp: Prüfe die Datei mit 'bash -n $file'"
         exit 1
     fi
     
@@ -419,6 +556,7 @@ load_config_from_file() {
     )
 
     # 2. Führe alle Validierungen in einer Schleife aus.
+    local validation_errors=0
     for rule in "${validations[@]}"; do
         IFS='|' read -r var_name validator error_msg condition <<< "$rule"
         
@@ -428,16 +566,23 @@ load_config_from_file() {
             # Prüfe, ob die Variable überhaupt gesetzt ist
             if [ -z "$value" ]; then
                 log_error "Fehlende Variable in Konfigurationsdatei: '$var_name'"
-                exit 1
+                ((validation_errors++))
+                continue
             fi
             # Prüfe den Wert mit der Validierungsfunktion (falls eine angegeben ist)
             # Der Doppelpunkt ':' ist ein Platzhalter für eine einfache Existenzprüfung.
             if [ "$validator" != ":" ] && ! "$validator" "$value"; then
                 log_error "Ungültiger Wert für '$var_name': $error_msg (Wert war: '$value')"
-                exit 1
+                ((validation_errors++))
             fi
         fi
     done
+    
+    # Bei Validierungsfehlern abbrechen
+    if [ $validation_errors -gt 0 ]; then
+        log_error "❌ $validation_errors Validierungsfehler gefunden. Bitte Config prüfen!"
+        exit 1
+    fi
 
     # --- Spezielle Logik (bleibt erhalten) ---
     # GeoIP Heimatland-Konflikt
@@ -454,7 +599,6 @@ load_config_from_file() {
     PORTAINER_IP="${PORTAINER_IP:-}"
 
     # --- Zusammenfassung ---
-    # (Die Zusammenfassung aus der vorherigen Version kann hier 1:1 wieder eingefügt werden)
     log_ok "Alle Validierungen bestanden - Setup kann beginnen!"
 }
 
