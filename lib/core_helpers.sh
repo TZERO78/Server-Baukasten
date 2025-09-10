@@ -261,7 +261,7 @@ pre_flight_checks() {
     fi
     
     # Windows-Zeilenumbrüche bereinigen
-    fix_line_endings_in_project
+    # fix_line_endings_in_project
 }
 
 ##
