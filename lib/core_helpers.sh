@@ -259,9 +259,6 @@ pre_flight_checks() {
     else
         log_ok "✅ Alle System-Mindestvoraussetzungen sind erfüllt."
     fi
-    
-    # Windows-Zeilenumbrüche bereinigen
-    fix_line_endings_in_project
 }
 
 ##
@@ -310,34 +307,6 @@ deb http://security.ubuntu.com/ubuntu/ ${DISTRIB_CODENAME}-security main restric
 EOF
             log_ok "  -> APT-Quellen repariert für Ubuntu ${DISTRIB_CODENAME}"
         fi
-    fi
-}
-
-##
-## Bereinigt Windows-Zeilenumbrüche in allen Projektdateien
-##
-fix_line_endings_in_project() {
-    log_debug "🔧 Prüfe Projektdateien auf Windows-Zeilenumbrüche..."
-    
-    local fixed_count=0
-    local dirs=("." "lib" "modules" "configs")
-    
-    for dir in "${dirs[@]}"; do
-        if [ -d "$dir" ]; then
-            while IFS= read -r -d '' file; do
-                # Prüfe ob Datei CRLF hat
-                if file "$file" 2>/dev/null | grep -q "CRLF\|with CR" || \
-                   head -1 "$file" | od -c | grep -q '\\r'; then
-                    sed -i 's/\r$//' "$file"
-                    ((fixed_count++))
-                    log_debug "  Bereinigt: $file"
-                fi
-            done < <(find "$dir" -maxdepth 1 -type f \( -name "*.sh" -o -name "*.conf" \) -print0 2>/dev/null)
-        fi
-    done
-    
-    if [ $fixed_count -gt 0 ]; then
-        log_info "✅ $fixed_count Dateien von Windows-Zeilenumbrüchen bereinigt"
     fi
 }
 
