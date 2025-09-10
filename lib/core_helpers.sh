@@ -263,51 +263,167 @@ pre_flight_checks() {
 
 ##
 ## Repariert APT-Quellen falls nötig (für frische VPS-Installationen)
+## Installiert auch apt-transport-https falls nötig für HTTPS-Quellen
 ##
 fix_apt_sources_if_needed() {
     log_info "  -> Prüfe APT-Quellen..."
     
-    # Test ob Basis-Pakete gefunden werden
-    if ! apt-cache search "^curl$" | grep -q curl 2>/dev/null; then
-        log_warn "  -> APT-Quellen scheinen unvollständig, repariere..."
+    # Bessere Prüfung: Teste ob wichtige Pakete verfügbar sind
+    local needs_fix=false
+    
+    # Debug: Zeige aktuelle APT-Quellen
+    log_debug "  -> Aktuelle APT-Quellen:"
+    log_debug "$(grep -v '^#\|^$' /etc/apt/sources.list 2>/dev/null | head -5)"
+    
+    # Prüfe ob APT-Quellen funktionieren
+    log_debug "  -> Prüfe APT-Policy..."
+    if ! apt-cache policy 2>/dev/null | grep -qE "deb\.debian\.org|archive\.ubuntu\.com|security\.(debian|ubuntu)"; then
+        needs_fix=true
+        log_warn "  -> Keine Standard-Repositories gefunden"
+        log_debug "  -> APT-Policy Output: $(apt-cache policy 2>&1 | head -3)"
+    elif ! apt-cache search "^htop$" 2>/dev/null | grep -q "htop"; then
+        needs_fix=true
+        log_warn "  -> Basis-Pakete nicht verfügbar"
+        log_debug "  -> Test-Paket 'htop' nicht gefunden"
+    fi
+    
+    # Debug: Prüfe IONOS Mirror-Listen
+    if [ -d /etc/apt/mirrors ]; then
+        log_debug "  -> Gefundene Mirror-Listen: $(ls -la /etc/apt/mirrors/ 2>/dev/null | grep -c '.list')"
+    fi
+    
+    if [ "$needs_fix" = true ]; then
+        log_warn "  -> APT-Quellen müssen repariert werden..."
         
-        # Backup
-        cp /etc/apt/sources.list /etc/apt/sources.list.backup.$(date +%Y%m%d_%H%M%S) 2>/dev/null || true
+        # Backup der aktuellen sources.list
+        if [ -f /etc/apt/sources.list ]; then
+            local backup_file="/etc/apt/sources.list.backup.$(date +%Y%m%d_%H%M%S)"
+            cp /etc/apt/sources.list "$backup_file"
+            log_info "  -> Backup erstellt: $backup_file"
+        fi
         
-        # Debian Version erkennen
+        # IONOS/Provider-spezifische Mirror-Listen entfernen
+        if [ -d /etc/apt/mirrors ]; then
+            log_debug "  -> Entferne Mirror-Listen..."
+            rm -f /etc/apt/mirrors/*.list 2>/dev/null
+            log_info "  -> Mirror-Listen entfernt"
+        fi
+        
+        # OS-Detection und sources.list generieren
         if [ -f /etc/debian_version ]; then
-            local VERSION_ID=$(cat /etc/debian_version | cut -d. -f1)
+            # Debian Version erkennen
+            local VERSION=$(cat /etc/debian_version)
+            local VERSION_ID=${VERSION%%.*}
             local CODENAME=""
             
+            log_debug "  -> Debian Version String: $VERSION"
+            log_debug "  -> Extrahierte Version ID: $VERSION_ID"
+            
             case "$VERSION_ID" in
-                12) CODENAME="bookworm" ;;
                 13) CODENAME="trixie" ;;
+                12) CODENAME="bookworm" ;;
                 11) CODENAME="bullseye" ;;
-                *) CODENAME="stable" ;;
+                10) CODENAME="buster" ;;
+                *)  
+                    # Fallback: Versuche Codename direkt zu ermitteln
+                    if [ -f /etc/os-release ]; then
+                        CODENAME=$(grep VERSION_CODENAME /etc/os-release | cut -d= -f2 | tr -d '"')
+                        log_debug "  -> Codename aus os-release: $CODENAME"
+                    fi
+                    [ -z "$CODENAME" ] && CODENAME="stable"
+                    ;;
             esac
             
-            # Neue sources.list
+            log_info "  -> Erkannt: Debian ${VERSION_ID} (${CODENAME})"
+            
+            # Neue sources.list schreiben (erst HTTP für apt-transport-https Installation)
+            log_debug "  -> Schreibe neue sources.list (HTTP)..."
             cat > /etc/apt/sources.list << EOF
 deb http://deb.debian.org/debian/ ${CODENAME} main contrib non-free non-free-firmware
 deb http://deb.debian.org/debian/ ${CODENAME}-updates main contrib non-free non-free-firmware
 deb http://security.debian.org/debian-security ${CODENAME}-security main contrib non-free non-free-firmware
+deb http://deb.debian.org/debian/ ${CODENAME}-backports main contrib non-free non-free-firmware
 EOF
             
-            # IONOS/Provider-spezifische Mirror-Listen entfernen
-            rm -f /etc/apt/mirrors/*.list 2>/dev/null || true
-            
-            log_ok "  -> APT-Quellen repariert für Debian ${VERSION_ID} (${CODENAME})"
-        elif [ -f /etc/lsb-release ]; then
+        elif [ -f /etc/lsb-release ] || [ -f /etc/os-release ]; then
             # Ubuntu
-            source /etc/lsb-release
+            local DISTRIB_CODENAME=""
+            if [ -f /etc/lsb-release ]; then
+                source /etc/lsb-release
+                log_debug "  -> LSB Release gefunden"
+            elif [ -f /etc/os-release ]; then
+                source /etc/os-release
+                DISTRIB_CODENAME=$VERSION_CODENAME
+                log_debug "  -> OS Release gefunden"
+            fi
+            
+            log_info "  -> Erkannt: Ubuntu ${DISTRIB_CODENAME}"
+            
+            log_debug "  -> Schreibe neue sources.list (HTTP)..."
             cat > /etc/apt/sources.list << EOF
 deb http://archive.ubuntu.com/ubuntu/ ${DISTRIB_CODENAME} main restricted universe multiverse
 deb http://archive.ubuntu.com/ubuntu/ ${DISTRIB_CODENAME}-updates main restricted universe multiverse
 deb http://security.ubuntu.com/ubuntu/ ${DISTRIB_CODENAME}-security main restricted universe multiverse
+deb http://archive.ubuntu.com/ubuntu/ ${DISTRIB_CODENAME}-backports main restricted universe multiverse
 EOF
-            log_ok "  -> APT-Quellen repariert für Ubuntu ${DISTRIB_CODENAME}"
+        else
+            log_error "  -> OS nicht erkannt! Bitte APT-Quellen manuell konfigurieren."
+            log_debug "  -> /etc/debian_version: $([ -f /etc/debian_version ] && echo 'existiert' || echo 'fehlt')"
+            log_debug "  -> /etc/lsb-release: $([ -f /etc/lsb-release ] && echo 'existiert' || echo 'fehlt')"
+            log_debug "  -> /etc/os-release: $([ -f /etc/os-release ] && echo 'existiert' || echo 'fehlt')"
+            return 1
         fi
+        
+        # APT-Cache aktualisieren
+        log_info "  -> Aktualisiere APT-Cache..."
+        log_debug "  -> Führe 'apt-get update' aus..."
+        local apt_output=$(apt-get update 2>&1)
+        local apt_result=$?
+        
+        if [ $apt_result -ne 0 ]; then
+            log_warn "  -> APT-Update hatte Fehler (Code: $apt_result)"
+            log_debug "  -> APT-Fehler: $(echo "$apt_output" | grep -E "^E:|^W:" | head -3)"
+        else
+            log_debug "  -> APT-Update erfolgreich"
+        fi
+        
+        # HTTPS-Transport installieren falls noch nicht vorhanden
+        if ! dpkg -l | grep -q "^ii.*apt-transport-https"; then
+            log_info "  -> Installiere apt-transport-https für sichere Verbindungen..."
+            if DEBIAN_FRONTEND=noninteractive apt-get install -y -qq apt-transport-https ca-certificates 2>/dev/null; then
+                log_debug "  -> apt-transport-https erfolgreich installiert"
+            else
+                log_warn "  -> Installation von apt-transport-https fehlgeschlagen"
+            fi
+        else
+            log_debug "  -> apt-transport-https bereits installiert"
+        fi
+        
+        # Jetzt auf HTTPS umstellen
+        log_info "  -> Stelle auf HTTPS-Quellen um..."
+        sed -i 's|http://deb\.debian\.org|https://deb.debian.org|g' /etc/apt/sources.list
+        sed -i 's|http://security\.debian\.org|https://security.debian.org|g' /etc/apt/sources.list
+        sed -i 's|http://archive\.ubuntu\.com|https://archive.ubuntu.com|g' /etc/apt/sources.list
+        sed -i 's|http://security\.ubuntu\.com|https://security.ubuntu.com|g' /etc/apt/sources.list
+        
+        log_debug "  -> Neue APT-Quellen (HTTPS):"
+        log_debug "$(grep -v '^#\|^$' /etc/apt/sources.list | head -5)"
+        
+        # Finaler APT-Update
+        log_debug "  -> Finaler APT-Update..."
+        apt-get update -qq 2>/dev/null
+        
+        # Verifikation
+        if apt-cache search "^htop$" | grep -q "htop"; then
+            log_ok "  -> APT-Quellen erfolgreich repariert und auf HTTPS umgestellt"
+        else
+            log_warn "  -> APT-Quellen repariert, aber Verifikation zeigt noch Probleme"
+        fi
+    else
+        log_ok "  -> APT-Quellen sind funktionsfähig"
     fi
+    
+    return 0
 }
 
 ##
