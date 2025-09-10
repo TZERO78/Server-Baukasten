@@ -61,11 +61,6 @@ module_base() {
 # --- Phase 3/7: Kern-Pakete ---
     log_info "  -> 3/7: Installiere Kern-Pakete..."
 
-	# APT-Quellen reparieren falls nötig (wichtig für IONOS und andere Problem-Provider)
-	if type -t fix_apt_sources_if_needed &>/dev/null; then
-		fix_apt_sources_if_needed
-	fi
-		
     export DEBIAN_FRONTEND=noninteractive
     readonly APT_OPTIONS="-y -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold"
     
