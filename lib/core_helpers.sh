@@ -259,6 +259,12 @@ pre_flight_checks() {
     else
         log_ok "✅ Alle System-Mindestvoraussetzungen sind erfüllt."
     fi
+<<<<<<< HEAD
+=======
+    
+    # Windows-Zeilenumbrüche bereinigen
+    # fix_line_endings_in_project
+>>>>>>> 02c6fb8ed3f4d16bd6254528ccd9c1f742ce95c9
 }
 
 ##
