@@ -342,14 +342,6 @@ pre_flight_checks() {
                 exit 1
             fi
         fi
-
-		# IMMER APT-Quellen prüfen bei bekannten Problem-Providern
-		if [ "${VPS_PROVIDER}" = "ionos" ] || [ -d /etc/apt/mirrors ]; then
-			log_warn "  -> IONOS/Problem-Provider erkannt - prüfe APT-Quellen..."
-			if type -t fix_apt_sources_if_needed &>/dev/null; then
-				fix_apt_sources_if_needed
-			fi
-		fi
         
         # Finale Verifikation mit Debug
         log_debug "  -> Verifiziere Installation..."
@@ -412,7 +404,14 @@ pre_flight_checks() {
         # Debug: Zeige vorhandene Befehle
         log_debug "  -> Alle ${#cmd_to_pkg[@]} kritischen Befehle sind vorhanden"
     fi
-    
+		# IMMER APT-Quellen prüfen bei bekannten Problem-Providern
+		if [ "${VPS_PROVIDER}" = "ionos" ] || [ -d /etc/apt/mirrors ]; then
+			log_warn "  -> IONOS/Problem-Provider erkannt - prüfe APT-Quellen..."
+			if type -t fix_apt_sources_if_needed &>/dev/null; then
+				fix_apt_sources_if_needed
+			fi
+		fi	
+
     return 0
 }
 
