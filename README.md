@@ -1,6 +1,11 @@
-# Server-Baukasten v5.1
+# Server-Baukasten 🏗️
 
-Modulares Server-Hardening für Linux mit NFTables, CrowdSec, GeoIP-Blocking und Docker-Integration.
+[![Version](https://img.shields.io/badge/Version-5.2.0-blue)](https://github.com/TZERO78/Server-Baukasten)
+[![License](https://img.shields.io/badge/License-MIT-green)](LICENSE)
+[![Debian](https://img.shields.io/badge/Debian-12-red)](https://www.debian.org/)
+[![Status](https://img.shields.io/badge/Status-Active-success)](https://github.com/TZERO78/Server-Baukasten)
+
+**Modulares Server-Hardening für Linux mit NFTables, CrowdSec, GeoIP-Blocking und Docker-Integration.**
 
 Pragmatisches Starter-Hardening für Home-Server & kleine VPS. Ein Bash-Skript das einen frischen Debian/Ubuntu-Server in ~20 Minuten mit einer konfigurierbaren Sicherheitsarchitektur ausstattet.
 
@@ -16,338 +21,334 @@ Bewusste Entscheidung für Einfachheit:
 
 Ansible ist technisch "sauberer", aber für die Zielgruppe überdimensioniert. Dieses Script soll schnell und verständlich sein, nicht perfekt.
 
-## Konzept
+## 📐 Konzept
 
 Der Server-Baukasten ist ein pragmatisches Starter-Tool mit drei Grundprinzipien:
 
-**1. Solides Sicherheitsfundament**
-Das Script implementiert mehrere Basisschutz-Schichten: NFTables-Firewall, CrowdSec IPS, GeoIP-Blocking und Kernel-Härtung. Es ist kein vollständiges Enterprise-System, sondern bietet eine sichere Ausgangsbasis für eigene Projekte.
+### 1. Solides Sicherheitsfundament
+Das Script implementiert mehrere Basisschutz-Schichten: NFTables-Firewall, CrowdSec IPS, GeoIP-Blocking und Kernel-Härtung (soweit auf VPS möglich - keine Kernel-Module oder Dateisystem-Änderungen). Es ist kein vollständiges Enterprise-System, sondern bietet eine sichere Ausgangsbasis für eigene Projekte.
 
-**2. Einfachheit vor Perfektion**
-Bewusst als simples Bash-Script entwickelt - transparent, nachvollziehbar, ohne externe Dependencies. Du behältst die volle Kontrolle und verstehst jeden Schritt.
+### 2. Einfachheit vor Perfektion
+Bewusst als simples Bash-Script entwickelt - transparent, nachvollziehbar, ohne externe Dependencies. Der Code wurde mit Hilfe von KI ausführlich kommentiert und dokumentiert. Du behältst die volle Kontrolle und verstehst jeden Schritt.
 
-**3. Reproduzierbares Setup**
-Server-Konfiguration über Config-File. Ermöglicht identische, gehärtete Server-Setups - einmal für die virtuelle Maschine zum Testen und zweitens am echten VPS für die Produktion.
+### 3. Reproduzierbares Setup
+Server-Konfiguration über Config-File. Ermöglicht identische, gehärtete Server-Setups - einmal für die virtuelle Maschine zum Testen und zweitens am echten VPS für die Produktion. Das Script ist noch nicht vollständig idempotent - dies wird nach und nach verbessert.
 
-**Was es NICHT ist:** Eine vollautomatische Enterprise-Lösung. Es schafft das sichere Fundament - für spezifische Services musst du selbst Hand anlegen. Du kannst das Script jederzeit auf deine Bedürfnisse anpassen.
+### 4. Moderne Technologie-Entscheidungen
+Bewusst auf aktuelle Standards gesetzt statt auf Legacy-Tools:
+- **NFTables** statt iptables (moderne Packet-Filterung)
+- **CrowdSec** statt Fail2ban (Community-basierte Threat Intelligence)
+- **systemd-timer** statt cron (bessere Integration und Logging)
+- **journald** statt logrotate (strukturiertes Logging mit automatischer Rotation)
+- **Docker** mit iptables-nft Backend (Hybrid-Lösung für Kompatibilität)
+
+Pragmatischer Mix bei Sicherheitstools:
+- **AIDE & RKHunter** bleiben im Einsatz, da moderne Alternativen (OSSEC, Wazuh) eigene Datenbanken benötigen und für Home-Server überdimensioniert sind
+- **AppArmor** als bewährtes MAC-System - einfacher als SELinux, effektiver als nichts
+
+## ⚠️ Was es NICHT ist
+
+Eine vollautomatische Enterprise-Lösung. Es schafft das sichere Fundament - für spezifische Services musst du selbst Hand anlegen. Du kannst das Script jederzeit auf deine Bedürfnisse anpassen.
 
 **Hinweis:** Das Script ist nicht perfekt und hat mit Sicherheit an der einen oder anderen Stelle noch kleine Bugs, die ich natürlich versuche zu beheben! Feedback und Bug-Reports sind immer willkommen.
 
-**Eigenschaften:**
-- Modulare Architektur mit separaten Komponenten
-- Reproduzierbare Konfiguration über Config-Files  
-- Kompatibel mit Docker ohne iptables-Konflikte
-- Automatische GeoIP-Updates und Boot-Wiederherstellung
-- Systemd-Timer statt Cron für Automatisierung
+## 🎯 Ziel
 
-**Einschränkungen:**
-- Nur Debian 12 und Ubuntu 22.04+ unterstützt
-- Nicht für Produktionsumgebungen ohne weitere Anpassungen
-- Erfordert grundlegende Linux-Kenntnisse
-- Kann bestehende Firewall-Konfigurationen überschreiben
+Automatisierte Einrichtung eines sicheren, produktionsbereiten Linux-Servers mit:
 
-## Installation
+- Gehärteter Firewall (NFTables)
+- Intrusion Prevention System (CrowdSec)
+- Container-Support (Docker)
+- VPN-Integration (Tailscale)
+- GeoIP-Blocking
+- Automatischen Sicherheitsupdates
+
+## ✨ Features
+
+### Sicherheit
+- **NFTables Firewall** mit dynamischer Regel-Verwaltung
+- **CrowdSec IPS** mit Community-Threat-Intelligence
+- **GeoIP-Blocking** für unerwünschte Länder
+- **SSH-Härtung** mit Key-Only-Auth und Brute-Force-Schutz
+- **AppArmor** Mandatory Access Control
+- **AIDE & RKHunter** für Integritätsprüfung
+- **Kernel-Härtung** via sysctl
+
+### Automation
+- **Unattended-Upgrades** für automatische Sicherheitsupdates
+- **Automatische Backup-Strategie** vor kritischen Änderungen
+- **Self-Healing APT** repariert defekte Paketquellen
+- **Provider-Detection** erkennt VPS-Anbieter automatisch
+
+### Container & Services
+- **Docker Engine** mit sicherer Konfiguration
+- **Portainer CE** für Container-Management
+- **Watchtower** für automatische Container-Updates
+- **Tailscale VPN** Integration
+
+## 🆕 Neu in Version 5.2
+
+- **Automatische VPS-Provider-Erkennung** (getestet mit IONOS)
+- **APT-Quellen-Reparatur** bei defekten Installationen
+- **Windows-Zeilenumbruch-Bereinigung** (CRLF→LF) für Config-Dateien
+- **Verbesserte Fehlerbehandlung** mit Retry-Logik
+
+[Vollständige Änderungen](CHANGELOG.md)
+
+## 📋 Systemanforderungen
+
+### Unterstützte Betriebssysteme
+| OS | Version | Status |
+|-----|---------|---------|
+| Debian | 12 (Bookworm) | ✅ Vollständig getestet |
+| Debian | 11 (Bullseye) | ⚠️ Sollte funktionieren |
+| Ubuntu | 22.04/24.04 | ⚠️ Ungetestet |
+
+### Getestete VPS-Provider
+| Provider | Status | Bemerkungen |
+|----------|--------|-------------|
+| IONOS | ✅ Getestet | Mirror-Listen werden automatisch repariert |
+| Andere | ⚠️ Ungetestet | Theoretische Unterstützung vorhanden |
+
+### Mindestanforderungen
+- 2 GB RAM
+- 10 GB Festplatte
+- Root-Zugriff
+- Internetverbindung
+
+## 🚀 Installation
+
+### Schnellstart
 
 ```bash
-# Automatische Installation aller Komponenten
-curl -fsSL https://raw.githubusercontent.com/TZERO78/Server-Baukasten/main/install.sh | bash
+# 1. Als root einloggen
+sudo -i
+
+# 2. Arbeitsverzeichnis erstellen
+mkdir -p /opt/scripts && cd /opt/scripts
+
+# 3. Repository klonen
+git clone https://github.com/TZERO78/Server-Baukasten.git
 cd Server-Baukasten
 
-# Konfiguration anpassen
+# 4. Konfiguration anpassen
 cp standard.conf mein-server.conf
 nano mein-server.conf
 
-# Setup ausführen
-sudo ./serverbaukasten.sh -c mein-server.conf
-
-# Nach Setup: Obligatorischer Neustart
-sudo reboot
-
-# Nach Neustart: GeoIP-Sets laden
-sudo geoip-manager update
+# 5. Installation starten
+./serverbaukasten.sh -c mein-server.conf
 ```
 
-## Kommando-Optionen
-
-| Option | Beschreibung |
-|--------|--------------|
-| `-c FILE` | Pfad zur Konfigurationsdatei (obligatorisch) |
-| `-t` | Test-Modus: Überspringt zeitintensive Schritte |
-| `-v` | Verbose: Detaillierte Ausgaben |
-| `-d` | Debug: Maximale Ausgaben |
-| `-h` | Hilfe anzeigen |
-
-## Projektstruktur
-
-```
-Server-Baukasten/
-├── install.sh                    # Automatische Installation
-├── serverbaukasten.sh            # Hauptskript
-├── standard.conf                 # Konfigurationsvorlage
-├── lib/                          # Kern-Bibliotheken
-│   ├── core_helpers.sh           # Logging, sudo-Verwaltung
-│   ├── ui_helpers.sh             # Benutzeroberfläche
-│   ├── validation_helpers.sh     # Input-Validierung
-│   ├── firewall_helpers.sh       # NFTables-Generierung
-│   ├── crowdsec_helpers.sh       # CrowdSec-Integration
-│   └── geoip_helpers.sh          # GeoIP-Management
-├── modules/                      # Setup-Module
-│   ├── module_cleanup.sh         # System-Bereinigung
-│   ├── module_base.sh            # Basis-System
-│   ├── module_security.sh        # Sicherheitsarchitektur
-│   ├── module_geoip.sh           # GeoIP-Blocking (eigenständig)
-│   ├── module_network.sh         # Tailscale VPN
-│   ├── module_container.sh       # Docker Engine
-│   ├── module_deploy_containers.sh # Management-Container
-│   └── [weitere Module]
-├── conf/                         # Konfigurationsvorlagen
-└── components/                   # Auto-Download Tools
-```
-
-## Sicherheitsarchitektur
-
-### Layer 1: NFTables Firewall
-Modulare Konfiguration in `/etc/nftables.d/`:
-- `10-base-filter.conf` - Grundregeln
-- `20-crowdsec.conf` - CrowdSec-Integration  
-- `30-geoip.conf` - GeoIP-Blocking
-- `40-tailscale.conf` - VPN-Regeln
-- `50-docker.conf` - Container-Forwarding
-- `60-services.conf` - SSH, ICMP
-- `90-nat.conf` - NAT für Tailscale
-
-### Layer 2: CrowdSec IPS
-- Community-basierte Angriffserkennung
-- Set-basierte NFTables-Integration
-- Automatische IP-Blacklists
-- Health-Check und Auto-Restart
-
-### Layer 3: GeoIP-Blocking
-- Länder-basierte IP-Filterung
-- Automatische Updates der IP-Listen
-- Boot-Service für Set-Wiederherstellung
-- Management via `geoip-manager` Tool
-
-### Layer 4: Tailscale VPN
-- Zero-Trust Netzwerk-Zugang
-- Mesh-Verbindung zwischen Geräten
-- Subnet-Routing Support
-- Automatische Client-Updates
-
-### Layer 5: Integritäts-Monitoring
-- AIDE Datei-Integritätsprüfung
-- RKHunter Rootkit-Scanner
-- Systemd-Timer für Automatisierung
-- E-Mail-Benachrichtigungen
-
-## Docker-Integration
-
-Das Script konfiguriert Docker mit iptables-nft Backend für Kompatibilität mit NFTables:
-
-```json
-{
-  "bip": "172.20.0.1/16",
-  "fixed-cidr": "172.20.0.0/16", 
-  "ipv6": true,
-  "fixed-cidr-v6": "fd00:cafe:beef::/56",
-  "log-driver": "journald",
-  "live-restore": true,
-  "userland-proxy": false
-}
-```
-
-Automatisch installierte Container:
-- Portainer (Container-Management auf localhost:9000)
-- Watchtower (Automatische Updates)
-
-## GeoIP-Management
+### Alternative: Direktinstallation via curl
 
 ```bash
-# Status anzeigen
-sudo geoip-manager status
-
-# Länder verwalten
-sudo geoip-manager country add RU
-sudo geoip-manager country remove CN
-sudo geoip-manager country home DE
-
-# Listen aktualisieren
-sudo geoip-manager update
-
-# IP testen
-sudo geoip-manager test 8.8.8.8
+mkdir -p /opt/scripts && cd /opt/scripts
+curl -fsSL https://raw.githubusercontent.com/TZERO78/Server-Baukasten/main/install.sh | bash
+cd server-baukasten
+cp standard.conf mein-server.conf
+nano mein-server.conf
+./serverbaukasten.sh -c mein-server.conf
 ```
 
-## Systemd-Timer
+## ⚙️ Konfiguration
 
-| Timer | Zeitplan | Funktion |
-|-------|----------|----------|
-| `aide-check.timer` | Täglich 05:00 | Datei-Integritätsprüfung |
-| `rkhunter-check.timer` | Sonntags 04:00 | Rootkit-Scanner |
-| `geoip-update.timer` | Sonntags 02:00 | GeoIP-Listen-Update |
-| `geoip-boot-restore.service` | Bei Boot | GeoIP-Sets wiederherstellen |
-| `crowdsec-healthcheck.timer` | Alle 5 Min | CrowdSec-Überwachung |
+### Wichtige Konfigurations-Parameter
 
-## Konfigurationsbeispiele
-
-### VPN-only Server (Maximal-Sicherheit)
 ```bash
-ACCESS_MODEL="1"                           # VPN-only
-SERVER_ROLE="1"                           # Docker-Host
-ENABLE_GEOIP_BLOCKING="ja"
-HOME_COUNTRY="DE"
-BLOCKED_COUNTRIES="CN RU KP IR BY MM SY AF IQ LY"
-ENABLE_SYSTEM_MAIL="ja"
-INSTALL_PORTAINER="ja"
-INSTALL_WATCHTOWER="ja"
-```
+# Basis-Einstellungen
+SERVER_HOSTNAME="mein-server"
+ADMIN_USER="administrator"
+TIMEZONE="Europe/Berlin"
+LOCALE="de_DE.UTF-8"
 
-### Öffentlicher Server
-```bash
-ACCESS_MODEL="2"                          # Öffentlich
-SERVER_ROLE="1"                          # Docker
+# Sicherheit
+SSH_PORT="6262"  # Non-Standard SSH Port
+ACCESS_MODEL="1"  # 1=VPN-Only, 2=Public
 ENABLE_GEOIP_BLOCKING="ja"
 BLOCKED_COUNTRIES="CN RU KP IR"
-SSH_PORT="2222"
+HOME_COUNTRY="DE"
+
+# Services
+SERVER_ROLE="1"  # 1=Docker-Server, 2=Einfacher Server
+INSTALL_PORTAINER="ja"
+INSTALL_WATCHTOWER="ja"
+
+# Tailscale VPN (optional)
+TAILSCALE_AUTH_KEY=""  # Aus Tailscale Admin Console
 ```
 
-### Minimaler Server
+[Vollständige Konfigurations-Dokumentation](docs/CONFIGURATION.md)
+
+## 📊 Module
+
+Das Skript ist modular aufgebaut:
+
+| Modul | Beschreibung |
+|-------|--------------|
+| `module_base` | System-Grundkonfiguration |
+| `module_security` | Firewall, SSH, CrowdSec |
+| `module_network` | VPN und Netzwerk |
+| `module_container` | Docker-Installation |
+| `module_geoip` | Länder-basiertes Blocking |
+| `module_verify` | Finale Überprüfung |
+
+## 🛠️ Verwendung
+
+### Basis-Befehle
+
 ```bash
-ACCESS_MODEL="1"                         # VPN-only
-SERVER_ROLE="2"                         # Kein Docker
-ENABLE_GEOIP_BLOCKING="nein"
-ENABLE_SYSTEM_MAIL="nein"
+# Normal-Installation
+./serverbaukasten.sh -c config.conf
+
+# Debug-Modus
+./serverbaukasten.sh -d -c config.conf
+
+# Test-Modus (schnell, ohne zeitintensive Operationen)
+./serverbaukasten.sh -t -c config.conf
+
+# Hilfe anzeigen
+./serverbaukasten.sh -h
 ```
 
-## Systemanforderungen
+### Nach der Installation
 
-**Minimum:**
-- RAM: 1GB (2GB für Docker empfohlen)
-- Speicher: 8GB (20GB für Docker)
-- OS: Debian 12 oder Ubuntu 22.04+
-- Netzwerk: Stabile Internetverbindung
-
-**Typischer Ressourcenverbrauch:**
-- NFTables: ~5MB RAM
-- CrowdSec: ~50MB RAM
-- GeoIP-Sets: ~10-50MB
-- AIDE/RKHunter: Hoch während Scans, sonst minimal
-
-## Nach dem Setup
-
-### Wichtige Befehle
 ```bash
-# System-Status
-sudo systemctl --failed
-sudo systemctl list-timers
+# Status prüfen
+sudo systemctl status
 
-# Sicherheits-Status
-sudo geoip-manager status
+# Firewall-Regeln anzeigen
+sudo nft list ruleset
+
+# CrowdSec Status
 sudo cscli metrics
-sudo nft list ruleset | head -20
 
-# Container-Status
+# GeoIP-Manager
+sudo geoip-manager status
+
+# Docker Status (falls installiert)
 sudo docker ps
-curl -I http://127.0.0.1:9000
 ```
 
-### SSH-Sicherheit
+## 🔒 Sicherheitskonzept
+
+### Defense in Depth
+Das Script implementiert mehrere Sicherheitsebenen:
+
+1. **Perimeter-Schutz**: GeoIP-Blocking, Rate-Limiting
+2. **Netzwerk-Sicherheit**: NFTables Firewall, VPN-Only Access Option
+3. **Angriffserkennung**: CrowdSec IPS mit Community Threat-Intelligence  
+4. **System-Härtung**: SSH-Härtung, Kernel-Parameter (soweit auf VPS möglich)
+5. **Monitoring**: AIDE, RKHunter, systemd-journald
+
+### Automatische Updates
+- Sicherheitsupdates via unattended-upgrades
+- Container-Updates via Watchtower (optional)
+- CrowdSec Threat-Intelligence Updates
+
+**Hinweis**: E-Mail-Benachrichtigungen sind konfigurierbar aber optional.
+
+## 📝 Wartung
+
+### Logs prüfen
 ```bash
-# SSH-Key einrichten
-ssh-keygen -t ed25519
-ssh-copy-id -p [SSH_PORT] [USER]@[SERVER_IP]
+# System-Logs
+journalctl -xe
 
-# Passwort-Login deaktivieren
-sudo nano /etc/ssh/sshd_config
-# PasswordAuthentication no
-sudo systemctl restart ssh
+# CrowdSec Logs
+journalctl -u crowdsec
 
-# Root sperren
-sudo passwd -l root
+# Docker Logs
+docker logs <container>
 ```
 
-## Troubleshooting
+### Backup
+Das Skript erstellt vereinzelt Backups vor kritischen Änderungen:
+- APT sources.list (vor Reparatur)
+- Andere System-Dateien bei Bedarf
 
-### Docker startet nicht
+**⚠️ Sicherheitshinweis**: Config-Dateien werden NICHT gesichert, da sie Passwörter im Klartext enthalten! Bewahre deine Config-Datei sicher und verschlüsselt auf.
+
+**Wichtig**: Mache vor der Installation ein manuelles System-Backup!
+
+## 🐛 Fehlerbehebung
+
+### APT-Probleme
+Werden automatisch erkannt und repariert (v5.2+)
+
+### SSH-Zugang verloren
+1. VPS-Provider Konsole nutzen
+2. Firewall temporär deaktivieren: `nft flush ruleset`
+3. SSH-Port prüfen: `grep Port /etc/ssh/sshd_config`
+
+### Docker-Probleme
 ```bash
-sudo systemctl status nftables
-sudo systemctl restart docker
-sudo docker system info
+systemctl restart docker
+docker system prune -a  # Vorsicht: Löscht alle ungenutzten Daten
 ```
 
-### GeoIP-Sets leer
-```bash
-sudo geoip-manager update
-sudo systemctl status geoip-boot-restore.service
-sudo nft list set inet filter geoip_blocked_v4
-```
+## 🤝 Beitragen
 
-### CrowdSec-Probleme
-```bash
-sudo systemctl status crowdsec crowdsec-bouncer-setonly
-sudo cscli machines list
-sudo cscli decisions list
-```
+Contributions sind willkommen!
 
-### Log-Analyse
-```bash
-# Setup-Logs
-sudo journalctl -t server-baukasten
+1. Fork das Repository
+2. Erstelle einen Feature Branch
+3. Committe deine Änderungen
+4. Push zum Branch
+5. Öffne einen Pull Request
 
-# Sicherheitslogs
-sudo journalctl -t crowdsec -t aide-check
+### Testen auf anderen Providern
 
-# Service-Logs
-sudo journalctl -u nftables -u docker -u tailscaled
-```
+Besonders gesucht: Tests auf
+- Hetzner
+- DigitalOcean
+- AWS/Azure
+- Anderen Debian/Ubuntu Versionen
 
-## Änderungen in v5.1
+Bitte öffne ein [Issue](https://github.com/TZERO78/Server-Baukasten/issues) mit deinen Erfahrungen.
 
-### GeoIP Boot-Service
-- Automatisches Wiederherstellen der GeoIP-Sets nach Neustart
-- `geoip-boot-restore.service` läuft nach nftables, vor Docker
-- Behebt leere Sets nach Reboots
-- Keine manuellen Updates mehr erforderlich
+## 📄 Lizenz
 
-### Portainer-Stabilität
-- Localhost-Binding (127.0.0.1:9000) statt Tailscale-IP
-- Behebt "cannot assign requested address" Fehler
-- Stabile Container nach Neustarts
-- SSH-Tunnel für externen Zugang
+Dieses Projekt steht unter der MIT-Lizenz - siehe [LICENSE](LICENSE) für Details.
 
-### Eigenständiges GeoIP-Modul
-- Alle Funktionen in einem Modul ohne externe Dependencies
-- Verbesserte Wartbarkeit und Debugging
-- Atomare NFTables-Updates ohne Unterbrechungen
+## 👥 Autoren
 
-## Migration von v5.0
+- **Markus F. (TZERO78)** - *Initial work*
+- **KI-Assistenten** - *Code-Optimierung*
 
-Ein Update ist nicht möglich. Führe ein komplettes Neu-Setup durch:
+## 🙏 Danksagung
 
-```bash
-# Alte Installation sichern (falls nötig)
-sudo tar -czf backup.tar.gz /etc/nftables.d/ /etc/geoip-*.conf
-
-# v5.1 neu installieren
-curl -fsSL https://raw.githubusercontent.com/TZERO78/Server-Baukasten/main/install.sh | bash
-cd Server-Baukasten
-sudo ./serverbaukasten.sh -c neue-config.conf
-```
-
-## Support
-
-- Repository: https://github.com/TZERO78/Server-Baukasten
-- Issues: Über GitHub Issues für Bug-Reports und Feature-Requests
-- Dokumentation: Siehe README und Code-Kommentare
-
-## Lizenz
-
-MIT-Lizenz - Copyright (c) 2025 Markus F. (TZERO78)
-
-## Danksagungen
-
-- **Christian (ion.it/Apfelcast)** für Linux-Security-Inspiration
-- **ct3003** für praktische Server-Tipps  
-- **Dennis Schröder (Raspberry Pi Cloud/ipv64.net)** für Ideen und Aufklärung
+### Inspiration & Wissensquellen
+- **Christian** (ion.it/Apfelcast) für Linux-Security-Inspiration
+- **ct3003** für praktische Server-Tipps
+- **Dennis Schröder** (Raspberry Pi Cloud/ipv64.net) für Ideen und Aufklärung
 - **Geek Freaks** für Docker-Best-Practices
-- Die **Open-Source-Community** für CrowdSec, Tailscale & NFTables
+
+### Open-Source-Projekte
+- [CrowdSec](https://www.crowdsec.net/) für das Community-basierte IPS
+- [Tailscale](https://tailscale.com/) für das einfache Mesh-VPN
+- [NFTables](https://netfilter.org/projects/nftables/) für moderne Packet-Filterung
+- Die Debian/Linux Community
+
+## ⚠️ Haftungsausschluss
+
+Dieses Skript macht tiefgreifende Systemänderungen. 
+- **Immer vorher ein Backup machen**
+- **Erst in einer Test-Umgebung ausprobieren**
+- **Keine Garantie für Produktivsysteme**
+
+Der Autor übernimmt keine Haftung für Schäden oder Datenverlust.
+
+## 📞 Support
+
+- [Issues](https://github.com/TZERO78/Server-Baukasten/issues) für Bug-Reports
+- [Discussions](https://github.com/TZERO78/Server-Baukasten/discussions) für Fragen
+
+---
+
+<div align="center">
+  
+**[Dokumentation](docs/) | [Changelog](CHANGELOG.md) | [Konfiguration](docs/CONFIGURATION.md) | [Wiki](../../wiki)**
+
+Made with ❤️ in Germany
+
+</div>
