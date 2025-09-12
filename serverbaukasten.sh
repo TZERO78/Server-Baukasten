@@ -73,12 +73,11 @@ check_root() {
 # Zeigt den Begrüßungs-Header an.
 ##
 show_startup_header() {
-    local version="5.1"
     local current_date=$(date '+%d.%m.%Y %H:%M:%S')
     
     echo
     echo "═══════════════════════════════════════════════════════════════════════════════"
-    echo "                           🏗️  SERVER-BAUKASTEN v$version"
+    echo "                           🏗️  SERVER-BAUKASTEN v$SCRIPT_VERSION"
     echo "═══════════════════════════════════════════════════════════════════════════════"
     echo "  Vollautomatische Linux-Server-Härtung nach modernen Sicherheitsstandards"
     echo
@@ -357,7 +356,7 @@ main() {
     trap 'rollback' ERR
     
     # 8. Begrüßung (nach Library-Load für erweiterte Funktionen)
-    log_info "Starte Server-Baukasten v5.1..."
+    log_info "Starte Server-Baukasten v$SCRIPT_VERSION..."
     if [ "$TEST_MODE" = true ]; then
         log_warn "TEST-MODUS ist aktiviert. Zeitaufwändige Operationen werden übersprungen."
     fi
