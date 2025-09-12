@@ -181,3 +181,14 @@ validate_countries_with_feedback() {
         return 0
     fi
 }
+
+## Prüft, ob Wert 1 oder 2 ist
+## param string $1 Der zu prüfende Wert.
+## return int 0=gültig, 1=ungültig
+is_choice_1_2() { [[ "$1" =~ ^[12]$ ]]; }
+
+## Prüft, ob Wert 'ja' oder 'nein' ist
+## param string $1 Der zu prüfende Wert.
+## return int 0=gültig, 1=ungültig  
+is_yes_no() { [[ "$1" =~ ^(ja|nein)$ ]]; }
+
