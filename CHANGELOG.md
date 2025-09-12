@@ -11,6 +11,49 @@ und dieses Projekt folgt [Semantic Versioning](https://semver.org/lang/de/).
 - Vollständige Idempotenz für wiederholbare Ausführungen (insbesondere Überarbeitung von `module_cleanup`)
 - Unterstützung für Ubuntu 22.04/24.04
 
+## [5.2.1] - 2025-09-12
+
+### Hinzugefügt
+- **Modulares Config-System**: Neue `config_helper.sh` und `validation_helpers.sh` für bessere Code-Organisation
+- **Secret-Management**: Optionale `*_FILE` Variablen für sichere Passwort-Handhabung aus Dateien
+- **Log-Maskierung**: Automatische Zensierung von Passwörtern und Tokens in Debug-Ausgaben (`***redacted***`)
+- **Erweiterte Bedingungslogik**: `!=` Operator für WHEN-Regeln in Config-Validierung
+- **Debug-Modus**: Umfangreiche Debug-Ausgaben mit `DEBUG=1` für besseres Troubleshooting
+- **Windows-Kompatibilität**: UTF-8 BOM Entfernung zusätzlich zu CRLF-Normalisierung
+- **Automatische Kanonisierung**: Ländercodes werden automatisch in Großbuchstaben konvertiert
+
+### Geändert
+- **Breaking Change**: `SSH_PORT` Standard von 22 auf 2222 für bessere Sicherheit (>1024)
+- Config-Validierung jetzt mit modularer Regel-Engine und bedingter Validierung
+- `resolve_secret()` als no-op Funktion - macht nichts wenn `*_FILE` Variablen fehlen
+- `cond_met()` unterstützt jetzt sowohl `=` als auch `!=` Operatoren
+- Robuste Defaults werden vor der Validierung gesetzt (reduziert Konfigurationsfehler)
+
+### Behoben
+- Config-Injection-Schutz durch strengere Zeichen- und Syntax-Prüfung
+- GeoIP Heimatland-Konflikt-Auflösung optimiert
+- Debug-Fallback für `log_debug()` falls global nicht definiert
+
+### Sicherheit
+- **Command Injection Schutz**: Erweiterte Filterung verdächtiger Zeichen in Config-Dateien
+- **Secret-Dateien**: Sichere Handhabung mit `umask 077` und Berechtigungsprüfung
+- **Log-Sicherheit**: Sensitive Daten werden automatisch in Logs maskiert
+
+### Dokumentation
+- Umfangreiche Best-Practice-Beispiele für Secret-Management in Config-Datei
+- Schritt-für-Schritt Anleitung für sichere Passwort-Handhabung
+- Erweiterte Szenario-Beispiele mit Security-Fokus
+
+### Technische Details
+- Neue Helper-Funktionen: `is_choice_1_2()`, `is_yes_no()`, `is_secret_var()`
+- Config-Normalisierung in separater Funktion mit temporären Dateien
+- Validierungsregeln als Array-basiertes System für bessere Wartbarkeit
+
+### Getestet auf
+- ✅ Debian 12 mit verschiedenen Config-Kombinationen
+- ✅ Windows-erstellte Config-Dateien (CRLF, UTF-8 BOM)
+- ✅ Secret-Dateien und Klartext-Passwörter
+
 ## [5.2.0] - 2025-09-12
 
 ### Hinzugefügt
