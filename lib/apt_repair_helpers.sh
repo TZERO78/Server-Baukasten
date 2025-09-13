@@ -261,37 +261,41 @@ fix_apt_sources_universal() {
 }
 
 # ---------------------- Einzelpaket-Installation -----------------------------
+# true nur bei exakt "install ok installed"
+_is_installed() {
+  dpkg-query -W -f='${Status}\n' "$1" 2>/dev/null | grep -qx 'install ok installed'
+}
+
 install_packages_safe() {
-  local pkgs=("$@"); [ ${#pkgs[@]} -gt 0 ] || { log_debug "install_packages_safe: nix zu tun"; return 0; }
+  local pkgs=("$@")
+  [ ${#pkgs[@]} -gt 0 ] || { log_debug "install_packages_safe: nix zu tun"; return 0; }
 
-  # nur fehlende Pakete
-  local todo=() p
-  for p in "${pkgs[@]}"; do dpkg -s "$p" >/dev/null 2>&1 || todo+=("$p"); done
-  [ ${#todo[@]} -gt 0 ] || { log_ok "Alle gewünschten Pakete sind bereits installiert."; return 0; }
+  # fehlende Pakete sammeln
+  local missing=() p
+  for p in "${pkgs[@]}"; do
+    _is_installed "$p" || missing+=("$p")
+  done
+  [ ${#missing[@]} -gt 0 ] || { log_ok "Alle gewünschten Pakete sind bereits installiert."; return 0; }
 
-  # Ziel-Codename & Default-Release sicherstellen
+  # Release/Locks wie gehabt
   local _id _ver _code; read -r _id _ver _code <<<"$(detect_os_version)"
   ensure_default_release_regex "$_code"
   apt_wait_for_locks
 
-  log_info "Installiere ${#todo[@]} Pakete (Einzelmodus, --allow-downgrades)…"
-  local failed=()
-  for p in "${todo[@]}"; do
-    dpkg -s "$p" >/dev/null 2>&1 && { log_debug "  -> $p bereits installiert"; continue; }
-    # FIX: apt_cmd -> apt-get
-    if ! DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends --allow-downgrades "$p"; then
-      log_warn "  -> fehlgeschlagen: $p"; failed+=("$p")
-    else
-      log_ok "  -> installiert: $p"
-    fi
-  done
-
-  if [ ${#failed[@]} -gt 0 ]; then
-    log_error "Folgende Pakete ließen sich nicht installieren: ${failed[*]}"
+  log_info "Installiere Pakete: ${missing[*]}"
+  if ! DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends --allow-downgrades "${missing[@]}"; then
+    log_error "Paketinstallation fehlgeschlagen: ${missing[*]}"
     return 1
   fi
-  log_ok "Alle gewünschten Pakete erfolgreich installiert."
+
+  # Minimal: wenn crowdsec frisch installiert wurde, Basiskonfig sicherstellen
+  if printf '%s\n' "${missing[@]}" | grep -qx 'crowdsec'; then
+    type ensure_crowdsec_basics >/dev/null 2>&1 && ensure_crowdsec_basics || true
+  fi
+
+  log_ok "Pakete installiert."
 }
+
 
 
 # ---------------------------- Öffentliche Wrapper ----------------------------
