@@ -38,6 +38,18 @@ apt_wait_for_locks() {
   dpkg --configure -a || true
 }
 
+# ----------------------- Alte APT-Backup-Dateien löschen ---------------------
+cleanup_apt_backup_files() {
+  local d="/etc/apt/apt.conf.d"
+  [ -d "$d" ] || return 0
+  # lösche nur Dateien mit unserer .bak.<timestamp> Signatur
+  find "$d" -maxdepth 1 -type f -name '*.bak.*' -print0 \
+    | while IFS= read -r -d '' f; do
+        log_warn "  -> Entferne APT-Backup: $(basename "$f")"
+        rm -f -- "$f"
+      done
+}
+
 # ----------------------------- Sanitizer -------------------------------------
 sanitize_sources_file() {
   local file="$1"
@@ -87,18 +99,24 @@ detect_os_version() {
 # und gibt die für 'n=<codename>' passenden 'a='-Archive (unique, sortiert) aus.
 get_archives_for_codename() {
   local codename="$1"
-  apt-cache policy 2>/dev/null \
-    | awk -v RS='' '1' \
-    | awk -v codename="$codename" '
-        $0 ~ /release / {
-          a=""; n="";
-          if (match($0, /a=([^, ]+)/, m)) a=m[1];
-          if (match($0, /n=([^, ]+)/, m)) n=m[1];
-          if (n==codename && a!="") print a;
-        }
-      ' \
-    | sort -u
+  apt-cache policy 2>/dev/null | awk -v codename="$codename" '
+    index($0, "release ") {
+      a=""; n="";
+      line=$0
+      pos=index(line,"release ")
+      if (pos>0) line=substr(line, pos+8)       # nach "release "
+      # Kommas zu Leerzeichen (ohne 3rd-arg gsub: über $0 umleiten)
+      old0=$0; $0=line; gsub(",", " "); line=$0; $0=old0
+      nf=split(line, f, /[[:space:]]+/)
+      for (i=1; i<=nf; i++) {
+        if (f[i] ~ /^a=/) a=substr(f[i],3)
+        else if (f[i] ~ /^n=/) n=substr(f[i],3)
+      }
+      if (n==codename && a!="") print a
+    }
+  ' | sort -u
 }
+
 
 # Prüft, ob der Codename in den Sourcen vorhanden ist (über n=)
 codename_present_in_sources() {
@@ -145,30 +163,36 @@ EOF
 ensure_default_release_regex() {
   local codename="$1" conf="/etc/apt/apt.conf.d/00-default-release"
 
-  # Sammle a=… für n=<codename>, z.B. stable, stable-updates, stable-security
-  local archives; archives=$(get_archives_for_codename "$codename" || true)
-  log_debug "    - a= Archive für n=$codename: $(tr '\n' ' ' <<<"$archives")"
+  # 1) Primär aus policy (a= … für n=<codename>)
+  local archives; archives="$(get_archives_for_codename "$codename" || true)"
 
-  # Wenn nichts gefunden wurde (z.B. frisch nach sources-Replace), fallback:
+  # 2) Wenn leer: heuristisch aus apt-cache policy ableiten
   if [ -z "$archives" ]; then
-    # Wenn systemweit 'stable' vorkommt, nutze das; sonst Codename direkt
-    if apt-cache policy | grep -q "a=stable"; then
-      archives="stable stable-updates stable-security"
-    else
-      # Für Ubuntu wäre es oft a=<codename> / <codename>-updates / <codename>-security
-      archives="$codename $codename-updates $codename-security"
+    # Versuche a= direkt neben n=<codename> mit sed rauszuziehen
+    local guess
+    guess="$(apt-cache policy 2>/dev/null \
+      | sed -n "/n=${codename}[, ]/ s/.*a=\([^, ]*\).*/\1/p" \
+      | sort -u)"
+    if [ -n "$guess" ]; then
+      archives="$(printf '%s\n%s\n%s\n' "$guess" "${guess}-updates" "${guess}-security")"
     fi
   fi
 
-  # Baue Regex: ^(arch1|arch2|…)$
-  local pat="^($(tr ' ' '|' <<<"$(tr '\n' ' ' <<<"$archives")"))$"
+  # 3) Als letzte Rückfallebene: nur Codename selbst
+  [ -n "$archives" ] || archives="$codename"
 
-  # Vorher alle alten Default-Release-Einträge entfernen
+  # 4) Patternliste ohne Leerzeilen/CRs & ohne trailing '|'
+  local patlist
+  patlist="$(
+    printf '%s' "$archives" | tr -d '\r' | sed '/^[[:space:]]*$/d' | paste -sd'|' -
+  )"
+
+  # Alte Einträge weg, neuen schreiben
   grep -Rl --null 'APT::Default-Release' /etc/apt 2>/dev/null \
     | xargs -0 -r sed -i -E '/APT::Default-Release/d'
+  printf 'APT::Default-Release "/^(%s)$/";\n' "$patlist" > "$conf"
 
-  printf 'APT::Default-Release "/%s/";\n' "$pat" > "$conf"
-  log_info "  -> Default-Release gesetzt auf Regex: /$pat/"
+  log_info  "  -> Default-Release gesetzt auf Regex: /^(${patlist})$/"
   log_debug "    - geschrieben nach: $conf"
 }
 
@@ -238,34 +262,24 @@ fix_apt_sources_universal() {
 
 # ---------------------- Einzelpaket-Installation -----------------------------
 install_packages_safe() {
-  local pkgs=("$@")
-  [ ${#pkgs[@]} -gt 0 ] || { log_debug "install_packages_safe: keine Pakete"; return 0; }
+  local pkgs=("$@"); [ ${#pkgs[@]} -gt 0 ] || { log_debug "install_packages_safe: nix zu tun"; return 0; }
 
-  # Filter: nur noch fehlende Pakete
+  # nur fehlende Pakete
   local todo=() p
   for p in "${pkgs[@]}"; do dpkg -s "$p" >/dev/null 2>&1 || todo+=("$p"); done
-  if [ ${#todo[@]} -eq 0 ]; then
-    log_ok "Alle gewünschten Pakete sind bereits installiert."
-    return 0
-  fi
+  [ ${#todo[@]} -gt 0 ] || { log_ok "Alle gewünschten Pakete sind bereits installiert."; return 0; }
 
-  # Ziel-Codename und -Regex nochmal ermitteln (falls sich was geändert hat)
+  # Ziel-Codename & Default-Release sicherstellen
   local _id _ver _code; read -r _id _ver _code <<<"$(detect_os_version)"
   ensure_default_release_regex "$_code"
-
   apt_wait_for_locks
 
-  log_info "Installiere ${#todo[@]} Pakete (Einzelmodus, mit --allow-downgrades)…"
+  log_info "Installiere ${#todo[@]} Pakete (Einzelmodus, --allow-downgrades)…"
   local failed=()
   for p in "${todo[@]}"; do
-    if dpkg -s "$p" >/dev/null 2>&1; then
-      log_debug "  -> $p bereits installiert"
-      continue
-    fi
-    # Wichtig: keine Sammelinstallation – Paket für Paket!
-    if ! DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends --allow-downgrades "$p"; then
-      log_warn "  -> Installation fehlgeschlagen: $p"
-      failed+=("$p")
+    dpkg -s "$p" >/dev/null 2>&1 && { log_debug "  -> $p bereits installiert"; continue; }
+    if ! DEBIAN_FRONTEND=noninteractive apt_cmd install -y --no-install-recommends --allow-downgrades "$p"; then
+      log_warn "  -> fehlgeschlagen: $p"; failed+=("$p")
     else
       log_ok "  -> installiert: $p"
     fi
@@ -275,9 +289,9 @@ install_packages_safe() {
     log_error "Folgende Pakete ließen sich nicht installieren: ${failed[*]}"
     return 1
   fi
-
   log_ok "Alle gewünschten Pakete erfolgreich installiert."
 }
+
 
 # ---------------------------- Öffentliche Wrapper ----------------------------
 fix_apt_sources_if_needed() { fix_apt_sources_universal; }

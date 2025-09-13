@@ -48,7 +48,10 @@ module_prepare_install() {
   fi
 
   explain "Wir stellen sicher, dass apt/dpkg frei sind und Basis-Tools vorhanden sind."
-
+  
+  # --- APT-Backup-Verzeichnis sicherstellen --------------------------------
+  cleanup_apt_backup_files	
+  
   # --- APT/DPKG-Locks abwarten ----------------------------------------------
   if type -t apt_wait_for_locks >/dev/null 2>&1; then
     apt_wait_for_locks

@@ -105,42 +105,81 @@ set_config_value() {
 
 ## Spinner-Ausführung (failsafe Farben)
 run_with_spinner() {
-    local title="$1" command="$2"
+  local title="$1"
+  local command="$2"
 
-    if [ "${SCRIPT_VERBOSE:-false}" = "true" ]; then
-        log_info "Ausführung (verbose): $title..."
-        eval "$command"
-        local ec=$?
-        [ $ec -eq 0 ] && log_ok "$title: Erfolg!" || log_error "$title: Fehlgeschlagen! (Exit-Code: $ec)"
-        return $ec
-    fi
+  # Farben optional (falls nicht definiert)
+  : "${YELLOW:=}"; : "${GREEN:=}"; : "${RED:=}"; : "${NC:=}"
 
-    local stderr_file; stderr_file=$(mktemp)
-    trap 'rm -f "$stderr_file"' RETURN
-
-    local spinner_chars="/|\\-"; local i=0
-    log_info "Starte: $title..."
-    eval "$command" >/dev/null 2>"$stderr_file" & local pid=$!
-
-    printf "${YELLOW}⏳ %s ${NC}" "$title"
-    while ps -p $pid &>/dev/null; do
-        i=$(((i + 1) % 4)); printf "\b${spinner_chars:$i:1}"; sleep 0.1
-    done
-
-    wait $pid; local ec=$?
+  # Verbose? -> direkt ausführen, sauber loggen
+  if [ "${SCRIPT_VERBOSE:-false}" = "true" ]; then
+    log_info "Ausführung (verbose): $title..."
+    eval "$command"
+    local ec=$?
     if [ $ec -eq 0 ]; then
-        printf "\b${GREEN}✔${NC}\n"; log_ok "$title: Abgeschlossen."
+      log_ok "$title: Erfolg!"
     else
-        printf "\b${RED}✖${NC}\n"; log_error "$title: Fehlgeschlagen!"
-        if [ -s "$stderr_file" ]; then
-            echo -e "${RED}┌─── FEHLERMELDUNG ─────────────────────────────────────────┐${NC}"
-            while IFS= read -r line; do echo -e "${RED}│${NC} $line"; done < "$stderr_file"
-            echo -e "${RED}└──────────────────────────────────────────────────────────┘${NC}"
-            logger -t "server-baukasten" -p "daemon.err" -- "FEHLERDETAILS ($title): $(cat "$stderr_file")"
-        fi
+      log_error "$title: Fehlgeschlagen! (Exit-Code: $ec)"
     fi
     return $ec
+  fi
+
+  # Tmp-Dateien VOR Trap anlegen (wichtig für set -u)
+  local stdout_file="" stderr_file=""
+  stdout_file="$(mktemp)" || { log_error "Konnte stdout-Tempdatei nicht erstellen"; return 1; }
+  stderr_file="$(mktemp)" || { rm -f "$stdout_file"; log_error "Konnte stderr-Tempdatei nicht erstellen"; return 1; }
+
+  # Cleanup ist set -u-sicher dank ${var:-}
+  cleanup_spinner_files() {
+    rm -f "${stdout_file:-}" "${stderr_file:-}"
+  }
+  trap cleanup_spinner_files RETURN
+
+  log_info "Starte: $title..."
+  # Befehl im Hintergrund ausführen, Ausgaben einsammeln
+  eval "$command" >"$stdout_file" 2>"$stderr_file" &
+  local pid=$!
+
+  # Einfacher, portable Spinner
+  local frames='|/-\' i=0
+  printf "%s⏳ %s %s" "${YELLOW}" "$title" "${NC}"
+  while kill -0 "$pid" 2>/dev/null; do
+    i=$(( (i + 1) % 4 ))
+    # nächstes Frame-Zeichen (1..4)
+    printf "\b%s" "$(printf '%s' "$frames" | cut -c $((i+1)))"
+    sleep 0.1
+  done
+
+  wait "$pid"
+  local ec=$?
+
+  if [ $ec -eq 0 ]; then
+    printf "\b%s✔%s\n" "${GREEN}" "${NC}"
+    log_ok "$title: Abgeschlossen."
+    # stdout nur bei Bedarf ins Debug
+    if [ -s "$stdout_file" ]; then
+      log_debug "stdout ($title):"
+      sed -e 's/^/    /' "$stdout_file" >&2
+    fi
+  else
+    printf "\b%s✖%s\n" "${RED}" "${NC}"
+    log_error "$title: Fehlgeschlagen! (Exit-Code: $ec)"
+    if [ -s "$stderr_file" ]; then
+      echo -e "${RED}┌─── FEHLERMELDUNG ─────────────────────────────────────────┐${NC}"
+      tail -n 80 "$stderr_file" | while IFS= read -r line; do
+        echo -e "${RED}│${NC} $line"
+      done
+      echo -e "${RED}└──────────────────────────────────────────────────────────┘${NC}"
+      if command -v logger >/dev/null 2>&1; then
+        logger -t "server-baukasten" -p "daemon.err" -- \
+          "FEHLERDETAILS ($title): $(tr '\n' ' ' < "$stderr_file" | cut -c1-8000)"
+      fi
+    fi
+  fi
+
+  return $ec
 }
+
 
 ## OS-Erkennung
 detect_os() {
