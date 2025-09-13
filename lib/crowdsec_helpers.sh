@@ -1,17 +1,89 @@
 #!/bin/bash
 ################################################################################
 #
-# BIBLIOTHEK: CROWDSEC-HELFER-FUNKTIONEN
+# BIBLIOTHEK: CROWDSEC-HELFER-FUNKTIONEN (MODERNISIERT)
 #
 # @description: Funktionen für die Installation und Konfiguration des
-#               CrowdSec-Agenten und des Firewall-Bouncers.
-# @author:      Markus F. (TZERO78) & KI-Assistenten
-# @repository:  https://github.com/TZERO78/Server-Baukasten
+#               CrowdSec-Agenten und des Firewall-Bouncers.
+#               Unterstützt sowohl Debian Bookworm als auch Trixie
+# @author:      Markus F. (TZERO78) & KI-Assistenten
+# @repository:  https://github.com/TZERO78/Server-Baukasten
 #
 # ------------------------------------------------------------------------------
 # Dieses Skript ist ein Modul des Server-Baukastens und steht unter der MIT-Lizenz.
 #
 ################################################################################
+
+##
+# Installiert CrowdSec für Debian Trixie aus offiziellen Repositories
+##
+install_crowdsec_for_trixie() {
+    log_info "  -> Installiere CrowdSec aus offiziellen Trixie-Repositories..."
+    
+    # Einfach: Direkt aus Debian-Repos (keine externen Repos nötig)
+    install_packages_safe crowdsec crowdsec-firewall-bouncer
+    
+    log_ok "CrowdSec aus offiziellen Debian-Repositories installiert"
+}
+
+##
+# Installiert CrowdSec für Debian Bookworm (mit Wahlmöglichkeit)
+##
+install_crowdsec_for_bookworm() {
+    log_info "  -> Installiere CrowdSec für Bookworm..."
+    
+    # Option 1: Offizielle Debian-Repos (ältere aber stabile Version)
+    if [ "${CROWDSEC_USE_OFFICIAL_REPO:-true}" = "true" ]; then
+        log_info "     📦 Nutze offizielle Bookworm-Repositories (v1.4.6-6~deb12u1)"
+        install_packages_safe crowdsec crowdsec-firewall-bouncer
+    else
+        # Option 2: Externes Repository (neueste Version)
+        log_info "     📦 Nutze externes packagecloud.io Repository (neueste Version)"
+        setup_crowdsec_external_repository
+        install_packages_safe crowdsec crowdsec-firewall-bouncer
+    fi
+    
+    log_ok "CrowdSec für Bookworm installiert"
+}
+
+##
+# Richtet externes CrowdSec-Repository ein (für Bookworm falls gewünscht)
+##
+setup_crowdsec_external_repository() {
+    # Idempotenz: Nur einrichten wenn nicht bereits vorhanden
+    if [ -f /etc/apt/sources.list.d/crowdsec_crowdsec.list ]; then
+        log_debug "CrowdSec-Repository bereits eingerichtet"
+        return 0
+    fi
+    
+    log_info "     -> Füge CrowdSec APT-Repository hinzu..."
+    local install_script="/tmp/crowdsec-install.sh"
+    
+    # Repository-Setup-Script herunterladen und validieren
+    if ! curl -s https://packagecloud.io/install/repositories/crowdsec/crowdsec/script.deb.sh -o "$install_script"; then
+        log_error "Download des CrowdSec-Repository-Scripts fehlgeschlagen"
+        return 1
+    fi
+    
+    # Grundlegende Validierung des Scripts
+    if ! grep -q "packagecloud" "$install_script"; then
+        log_error "Das heruntergeladene CrowdSec-Installationsskript scheint ungültig zu sein"
+        rm -f "$install_script"
+        return 1
+    fi
+    
+    # Repository einrichten und Package-Liste aktualisieren
+    if run_with_spinner "Richte APT-Repository ein und aktualisiere..." "bash '$install_script' && apt-get update -qq"; then
+        log_ok "Externes CrowdSec-Repository erfolgreich eingerichtet"
+    else
+        log_error "Repository-Setup fehlgeschlagen"
+        rm -f "$install_script"
+        return 1
+    fi
+    
+    # Cleanup
+    rm -f "$install_script"
+}
 
 ##
 # Erstellt einen dedizierten systemd-Service für set-only Mode
@@ -133,48 +205,45 @@ EOF
     systemctl daemon-reload
     systemctl enable crowdsec-bouncer-setonly.service
     
-    log_ok "Dedizierter set-only Service erstellt und aktiviert."
+    log_ok "Dedizierter set-only Service erstellt und aktiviert"
     log_info "  Service-Datei: $service_file"
     log_info "  Nutzt Sets: crowdsec-blacklists (IPv4) & crowdsec6-blacklists (IPv6)"
     log_info "  Zu starten mit: systemctl start crowdsec-bouncer-setonly"
 }
 
-
 #################################################################################
-#                             INITIALISIERUNG
+#                             HAUPTFUNKTIONEN
 #           CrowdSec Stack und Bouncer-Installation fuer NFTables
 ################################################################################
+
 ##
-# Installiert den CrowdSec Agenten und den Firewall Bouncer.
+# Installiert den CrowdSec Agenten und den Firewall Bouncer (modernisiert für Debian-Versionen)
 ##
 install_crowdsec_stack() {
     log_info "⚙️  Installiere und konfiguriere den CrowdSec-Stack..."
 
-    # --- 1. CrowdSec Repository hinzufügen (falls nötig) ---
-    if [ ! -f /etc/apt/sources.list.d/crowdsec_crowdsec.list ]; then
-        log_info "  -> Füge CrowdSec APT-Repository hinzu..."
-        local install_script="/tmp/crowdsec-install.sh"
-        curl -s https://packagecloud.io/install/repositories/crowdsec/crowdsec/script.deb.sh -o "$install_script"
-        
-        if grep -q "packagecloud" "$install_script"; then
-            run_with_spinner "Richte APT-Repository ein und aktualisiere..." "bash '$install_script' && apt-get update -qq"
-        else
-            log_error "Das heruntergeladene CrowdSec-Installationsskript scheint ungültig zu sein."
-            rm -f "$install_script"
-            return 1
-        fi
-        rm -f "$install_script"
-    fi
+    # --- 1. Debian-Version erkennen und entsprechend installieren ---
+    local debian_version
+    debian_version=$(lsb_release -cs 2>/dev/null || echo "unknown")
+    
+    log_info "  -> Erkannte Debian-Version: $debian_version"
+    
+    case "$debian_version" in
+        "trixie")
+            install_crowdsec_for_trixie
+            ;;
+        "bookworm")
+            install_crowdsec_for_bookworm
+            ;;
+        *)
+            log_warn "Unbekannte/Unsupported Debian-Version: $debian_version"
+            log_info "Fallback: Verwende externe Repository-Methode..."
+            setup_crowdsec_external_repository
+            install_packages_safe crowdsec crowdsec-firewall-bouncer
+            ;;
+    esac
 
-    # --- 2. CrowdSec Agent sauber installieren ---
-    log_info "  -> Installiere CrowdSec Agenten (ggf. Re-Installation)..."
-    local install_cmd="apt-get remove --purge -y crowdsec >/dev/null 2>&1; DEBIAN_FRONTEND=noninteractive apt-get install -y crowdsec"
-    if ! run_with_spinner "Installiere 'crowdsec' Paket..." "$install_cmd"; then
-        log_error "Installation des CrowdSec Agenten ist fehlgeschlagen."
-        return 1
-    fi
-
-    # --- 3. systemd-Verhalten anpassen ---
+    # --- 2. systemd-Verhalten anpassen ---
     log_info "  -> Konfiguriere CrowdSec für netzwerkabhängigen Start..."
     mkdir -p /etc/systemd/system/crowdsec.service.d
     cat > /etc/systemd/system/crowdsec.service.d/override.conf <<EOF
@@ -185,11 +254,10 @@ Restart=on-failure
 RestartSec=30s
 EOF
 
-    # --- 4. Firewall Bouncer installieren ---
-    # Die Funktion install_bouncer sollte ihr eigenes, sauberes Logging haben.
-    install_bouncer
+    # --- 3. Bouncer ist bereits installiert, nur noch konfigurieren ---
+    configure_bouncer
 
-    # --- 5. Services aktivieren und Start verifizieren ---
+    # --- 4. Services aktivieren und Start verifizieren ---
     log_info "  -> Aktiviere CrowdSec-Dienste und warte auf den Start..."
     systemctl daemon-reload
     systemctl enable --now crowdsec >/dev/null 2>&1
@@ -203,27 +271,30 @@ EOF
         exit 1"
     
     if run_with_spinner "Warte auf CrowdSec-API..." "bash -c \"$wait_cmd\""; then
-        log_ok "CrowdSec-Agent ist erfolgreich gestartet und API ist erreichbar."
+        log_ok "CrowdSec-Agent ist erfolgreich gestartet und API ist erreichbar"
         return 0
     else
-        log_error "CrowdSec-Agent konnte nicht gestartet werden oder die API antwortet nicht."
+        log_error "CrowdSec-Agent konnte nicht gestartet werden oder die API antwortet nicht"
         return 1
     fi
 }
 
-install_bouncer() {
-    log_info "🐾 Installiere CrowdSec-Bouncer (NFTables-Integration)..."
-    log_debug "Bouncer-Installation gestartet mit DEBUG-Modus"
+##
+# Konfiguriert den Firewall-Bouncer (Pakete sind bereits installiert)
+##
+configure_bouncer() {
+    log_info "🐾 Konfiguriere CrowdSec-Bouncer (NFTables-Integration)..."
+    log_debug "Bouncer-Konfiguration gestartet mit DEBUG-Modus"
 
     # --- 1. Voraussetzungen prüfen ---
     log_info "  -> Prüfe Voraussetzungen (CrowdSec-Service & API)..."
     if ! systemctl is-active --quiet crowdsec; then
-        log_error "Voraussetzung nicht erfüllt: CrowdSec-Service läuft nicht."
+        log_error "Voraussetzung nicht erfüllt: CrowdSec-Service läuft nicht"
         return 1
     fi
     
     if ! cscli metrics >/dev/null 2>&1; then
-        log_error "Voraussetzung nicht erfüllt: CrowdSec API ist nicht erreichbar."
+        log_error "Voraussetzung nicht erfüllt: CrowdSec API ist nicht erreichbar"
         return 1
     fi
     
@@ -232,42 +303,32 @@ install_bouncer() {
         return 1
     fi
     
-    log_ok "Voraussetzungen erfüllt: CrowdSec-Service, API und NFTables verfügbar."
+    log_ok "Voraussetzungen erfüllt: CrowdSec-Service, API und NFTables verfügbar"
 
-    # --- 3. Bouncer-Paket installieren ---
+    # --- 2. Konfigurationsdateien vorbereiten ---
     local pkg="crowdsec-firewall-bouncer"
     local dir="/etc/crowdsec/bouncers"
     local base_yml="$dir/crowdsec-firewall-bouncer.yaml"
     local local_yml="$dir/crowdsec-firewall-bouncer.yaml.local"
     local keyfile="$dir/.api_key"
     
-    # Stelle sicher, dass Bouncer-Verzeichnis existiert
-    mkdir -p "$dir"
-    
-    local install_cmd="apt-get remove --purge -y '$pkg' >/dev/null 2>&1 || true; rm -rf '$dir'; DEBIAN_FRONTEND=noninteractive apt-get install -y '$pkg'"
-    if ! run_with_spinner "Installiere Bouncer-Paket..." "$install_cmd"; then
-        log_error "Installation des Bouncer-Pakets ist fehlgeschlagen."
-        return 1
-    fi
-
-    # ROBUSTHEIT: Warte auf Base-Konfigurationsdatei (aus alter Version)
-    local wait_count=0
-    while [ ! -f "$base_yml" ] && [ $wait_count -lt 30 ]; do
-        sleep 1
-        ((wait_count++))
-    done
-    
+    # BOUNCER IST BEREITS INSTALLIERT - nur Konfiguration prüfen
     if [ ! -f "$base_yml" ]; then
         log_error "Base-Konfigurationsdatei nicht gefunden: $base_yml"
+        log_error "Bouncer-Paket nicht korrekt installiert!"
         return 1
     fi
     log_debug "Base-Konfigurationsdatei verfügbar"
 
-    # --- 4. Konfiguriere für NFTables-Modus ---
+    # --- 3. Konfiguriere für NFTables-Modus ---
     log_info "  -> Konfiguriere NFTables-Modus..."
-    # Kopiere vollständige Base-Config zu Local-Config
-    cp "$base_yml" "$local_yml"
-    log_debug "Vollständige Konfiguration kopiert: $base_yml -> $local_yml"
+    # Idempotenz: Nur kopieren wenn lokale Config nicht existiert oder veraltet ist
+    if [ ! -f "$local_yml" ] || [ "$base_yml" -nt "$local_yml" ]; then
+        cp "$base_yml" "$local_yml"
+        log_debug "Vollständige Konfiguration kopiert: $base_yml -> $local_yml"
+    else
+        log_debug "Lokale Konfiguration ist bereits aktuell"
+    fi
     
     # Ersetze Template-Variable ${BACKEND} durch nftables
     if grep -q '${BACKEND}' "$local_yml" 2>/dev/null; then
@@ -282,7 +343,7 @@ install_bouncer() {
     sed -i 's/debug: .*/debug: false/' "$local_yml"
     sed -i 's/log_level: .*/log_level: info/' "$local_yml"
 
-    # --- 5. KRITISCH: Server-Baukasten NFTables-Integration (set-only) ---
+    # --- 4. KRITISCH: Server-Baukasten NFTables-Integration (set-only) ---
     log_info "  -> Konfiguriere für Server-Baukasten NFTables-Integration..."
     
     # Set-only Mode aktivieren (der fehlende Schlüssel!)
@@ -310,7 +371,7 @@ install_bouncer() {
     log_info "     🔧 Set-only Modus aktiviert"
     log_info "     🎯 NFTables-Sets: crowdsec-blacklists (IPv4), crowdsec6-blacklists (IPv6)"
 
-    # --- 6. API-Schlüssel (robuste Methode aus alter Version) ---
+    # --- 5. API-Schlüssel (robuste Methode mit Idempotenz) ---
     log_info "  -> Generiere und konfiguriere API-Schlüssel..."
     
     if [ ! -s "$keyfile" ]; then
@@ -324,19 +385,21 @@ install_bouncer() {
         log_debug "API-Key-File existiert bereits"
     fi
     
-    # ROBUSTE API-KEY-ERSETZUNG (temp-file Methode aus alter Version)
+    # ROBUSTE API-KEY-ERSETZUNG (temp-file Methode)
     local api_key
     api_key=$(cat "$keyfile" 2>/dev/null | tr -d '\n\r')
     if [ -n "$api_key" ]; then
         if grep -q '${API_KEY}' "$local_yml" 2>/dev/null; then
             log_debug "Template-Variable \${API_KEY} gefunden, ersetze durch echten Key"
-            # Sichere Methode mit temp-file (verhindert Probleme mit Sonderzeichen)
             printf '%s\n' "$(cat "$local_yml")" | sed "s|\${API_KEY}|$api_key|g" > "$local_yml.tmp"
             mv "$local_yml.tmp" "$local_yml"
         else
-            log_debug "Keine Template-Variable, setze API-Key direkt"
-            printf '%s\n' "$(cat "$local_yml")" | sed "s|^api_key:.*|api_key: $api_key|" > "$local_yml.tmp"
-            mv "$local_yml.tmp" "$local_yml"
+            # Idempotenz: Nur ersetzen wenn noch nicht gesetzt
+            if ! grep -q "^api_key: $api_key" "$local_yml"; then
+                log_debug "Keine Template-Variable, setze API-Key direkt"
+                printf '%s\n' "$(cat "$local_yml")" | sed "s|^api_key:.*|api_key: $api_key|" > "$local_yml.tmp"
+                mv "$local_yml.tmp" "$local_yml"
+            fi
         fi
         log_info "     🔑 API-Key konfiguriert"
     else
@@ -344,11 +407,11 @@ install_bouncer() {
         return 1
     fi
 
-    # --- 7. Dedizierter systemd-Service für set-only Mode ---
+    # --- 6. Dedizierter systemd-Service für set-only Mode ---
     log_info "  -> Erstelle dedizierten systemd-Service für set-only Mode..."
     create_setonly_bouncer_service
 
-    # --- 8. Health-Check-System (aus alter Version) ---
+    # --- 7. Health-Check-System ---
     log_info "  -> Installiere Health-Check-System..."
     install -m755 /dev/null /usr/local/bin/crowdsec-healthcheck
     cat > /usr/local/bin/crowdsec-healthcheck <<'EOF'
@@ -359,7 +422,7 @@ if ! cscli metrics >/dev/null 2>&1; then
 fi
 EOF
     
-    # Health-Check systemd Service und Timer
+    # Health-Check systemd Service und Timer (Idempotenz durch ExecCondition)
     cat > /etc/systemd/system/crowdsec-healthcheck.service <<'EOF'
 [Unit]
 Description=CrowdSec Health-Check
@@ -385,7 +448,7 @@ Unit=crowdsec-healthcheck.service
 WantedBy=timers.target
 EOF
 
-    # NFTables-Service Integration (aus alter Version)
+    # NFTables-Service Integration
     log_info "  -> Integriere mit nftables-Service..."
     local nft_override_dir="/etc/systemd/system/nftables.service.d"
     mkdir -p "$nft_override_dir"
@@ -395,7 +458,7 @@ EOF
 ExecReloadPost=/usr/bin/systemctl try-restart crowdsec-bouncer-setonly
 EOF
 
-    # --- 9. Services aktivieren mit Retry-Mechanismus (aus alter Version) ---
+    # --- 8. Services aktivieren mit Retry-Mechanismus ---
     systemctl daemon-reload
     
     if run_with_spinner "Aktiviere Set-Only-Bouncer und Health-Check..." "systemctl enable --now crowdsec-bouncer-setonly crowdsec-healthcheck.timer"; then
@@ -425,13 +488,13 @@ EOF
         fi
         
         if [ "$verification_passed" = true ]; then
-            log_ok "CrowdSec-Bouncer erfolgreich installiert"
+            log_ok "CrowdSec-Bouncer erfolgreich konfiguriert"
             log_info "  -> Set-only Mode: Nutzt vordefinierte NFTables-Struktur"
             log_info "  -> Health-Check läuft alle 5 Minuten"
             log_info "  -> Service: crowdsec-bouncer-setonly"
             return 0
         else
-            log_error "Bouncer-Installation unvollständig!"
+            log_error "Bouncer-Konfiguration unvollständig!"
             return 1
         fi
     else
@@ -440,8 +503,8 @@ EOF
     fi
 }
 
-
-# Passt die CrowdSec SSH-Policy an die Benutzereingaben an.
+##
+# Passt die CrowdSec SSH-Policy an die Benutzereingaben an
 ##
 tune_crowdsec_ssh_policy() {
     log_info "  -> Passe CrowdSec SSH-Policy an (Ban-Dauer: ${CROWDSEC_BANTIME})..."
@@ -453,7 +516,10 @@ tune_crowdsec_ssh_policy() {
         mkdir -p /etc/crowdsec/profiles.d/
         
         local custom_profile="/etc/crowdsec/profiles.d/99-custom-ssh-duration.yaml"
-        cat > "$custom_profile" <<EOF
+        
+        # Idempotenz: Nur erstellen wenn nicht bereits vorhanden oder veraltet
+        if [ ! -f "$custom_profile" ] || ! grep -q "duration: \"$CROWDSEC_BANTIME\"" "$custom_profile"; then
+            cat > "$custom_profile" <<EOF
 name: custom_ssh_ban_duration
 description: "Override default ssh ban duration"
 filters:
@@ -463,9 +529,11 @@ decisions:
     duration: "$CROWDSEC_BANTIME"
 on_success: break
 EOF
-        log_ok "Custom SSH-Profile mit Ban-Dauer '$CROWDSEC_BANTIME' erstellt."
+            log_ok "Custom SSH-Profile mit Ban-Dauer '$CROWDSEC_BANTIME' erstellt"
+        else
+            log_debug "Custom SSH-Profile bereits korrekt konfiguriert"
+        fi
     else
-        log_info "Standard CrowdSec SSH-Ban-Dauer ('48h') wird verwendet."
+        log_info "Standard CrowdSec SSH-Ban-Dauer ('4h') wird verwendet"
     fi
 }
-
