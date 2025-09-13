@@ -256,6 +256,7 @@ run_setup() {
     detect_os
     module_fix_apt_sources
     module_base
+	module_install_services
     module_system_update "$TEST_MODE"
     
     # WICHTIG: Kernel-Härtung VOR Firewall (IP-Forwarding für Docker/VPN)

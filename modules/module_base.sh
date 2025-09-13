@@ -3,40 +3,51 @@
 #
 # MODUL: BASIS-SYSTEM-SETUP
 #
-# @description: Führt die grundlegende Systemkonfiguration durch,
-#               wie Hostname, Zeitzone, Benutzer, Pakete und Swap.
-# @author:      Markus F. (TZERO78) & KI-Assistenten
-# @repository:  https://github.com/TZERO78/Server-Baukasten
-#
-# ------------------------------------------------------------------------------
-# Dieses Skript ist ein Modul des Server-Baukastens und steht unter der MIT-Lizenz.
+# @description: Grundlegende Systemkonfiguration (Hostname, Zeitzone, Locale,
+#               Benutzer, Passwörter, Swap). KEINE Paket- oder Docker-Installs!
+# @license:     MIT
 #
 ################################################################################
 
+set -Eeuo pipefail
+
 ##
 # MODUL 2: Führt die grundlegende Systemkonfiguration durch.
-# Setzt Hostname, Zeitzone, Locale, Benutzer, Passwörter und installiert Kernpakete.
 ##
 module_base() {
     log_info "📦 MODUL: Basis-System-Setup"
-    
-    # --- Phase 1/7: System-Identität ---
-    log_info "  -> 1/7: Konfiguriere System-Identität..."
+
+    # --- Phase 1/5: System-Identität ------------------------------------------------
+    log_info "  -> 1/5: Konfiguriere System-Identität..."
+    log_debug "     Hostname alt: $(hostname -f 2>/dev/null || hostname)"
+
+    # /etc/hosts vorbereiten (Backup nur einmal anlegen)
+    if type -t backup_and_register >/dev/null 2>&1; then
+        backup_and_register "/etc/hosts"
+    fi
+
     hostnamectl set-hostname "$SERVER_HOSTNAME"
-    sed -i "/127.0.1.1/c\127.0.1.1       $SERVER_HOSTNAME" /etc/hosts
+    if grep -qE '^127\.0\.1\.1' /etc/hosts; then
+        sed -i -E "s|^127\.0\.1\.1.*|127.0.1.1       ${SERVER_HOSTNAME}|" /etc/hosts
+    else
+        echo "127.0.1.1       ${SERVER_HOSTNAME}" >> /etc/hosts
+    fi
     log_ok "Hostname gesetzt auf: $SERVER_HOSTNAME"
-    
+
+    # Zeitzone
     timedatectl set-timezone "$TIMEZONE"
     log_ok "Zeitzone gesetzt auf: $TIMEZONE"
-    
-    sed -i -E 's/^#\s*(de_DE.UTF-8\s+UTF-8)/\1/' /etc/locale.gen
-    sed -i -E 's/^#\s*(en_US.UTF-8\s+UTF-8)/\1/' /etc/locale.gen
+
+    # Locale
+    log_debug "     Aktuelles LOCALE: ${LOCALE}"
+    sed -i -E 's/^#\s*(de_DE\.UTF-8\s+UTF-8)/\1/' /etc/locale.gen
+    sed -i -E 's/^#\s*(en_US\.UTF-8\s+UTF-8)/\1/' /etc/locale.gen
     run_with_spinner "Generiere Locales..." "locale-gen"
     update-locale LANG="$LOCALE"
     log_ok "System-Locale gesetzt auf: $LOCALE"
-    
-    # --- Phase 2/7: Benutzer-Management ---
-    log_info "  -> 2/7: Konfiguriere Benutzer-Accounts..."
+
+    # --- Phase 2/5: Benutzer-Management --------------------------------------------
+    log_info "  -> 2/5: Konfiguriere Benutzer-Accounts..."
     echo "root:$ROOT_PASSWORD" | chpasswd
     log_ok "Root-Passwort aktualisiert."
 
@@ -51,145 +62,29 @@ module_base() {
     usermod -aG sudo "$ADMIN_USER"
     log_ok "Admin-Benutzer '$ADMIN_USER' konfiguriert und zur sudo-Gruppe hinzugefügt."
 
-    # SICHERE sudo-Rechte-Vergabe:
+    # Temporäre, sichere NOPASSWD-Rechte für die Setup-Phase
     if ! grant_temporary_sudo_rights; then
         log_error "Konnte temporäre sudo-Rechte nicht gewähren!"
         exit 1
     fi
     log_warn "Temporäre NOPASSWD sudo-Rechte für '$ADMIN_USER' aktiviert (werden am Ende entfernt)."
 
-# --- Phase 3/7: Kern-Pakete ---
-    log_info "  -> 3/7: Installiere Kern-Pakete..."
+    # --- Phase 3/5: (frei für spätere System-Feinheiten) ----------------------------
+    # Platzhalter, falls du hier später noch Basiskonfig (ohne Paketinstall) ergänzen willst
 
-    export DEBIAN_FRONTEND=noninteractive
-    readonly APT_OPTIONS="-y -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold"
-    
-    local packages_to_install=()
-    packages_to_install+=("sudo" "nano" "vim" "curl" "wget" "gpg" "ca-certificates" "software-properties-common" "apt-transport-https") # System
-    packages_to_install+=("htop" "tree" "unzip" "git" "rsync" "screen" "tmux" "net-tools" "bind9-dnsutils" "tcpdump" "jq" "lsof" "file" "psmisc") # Admin
-    packages_to_install+=("aide" "rkhunter" "apparmor" "apparmor-utils" "libipc-system-simple-perl") # Security
-    
-    if [ "${ENABLE_GEOIP_BLOCKING:-nein}" = "ja" ]; then
-        log_info "     -> Füge GeoIP-Pakete zur Installationsliste hinzu..."
-        packages_to_install+=("ipset" "geoip-database" "geoip-bin")
-    fi
-    if [ "$ENABLE_SYSTEM_MAIL" = "ja" ]; then
-        log_info "     -> Füge Mail-Pakete zur Installationsliste hinzu..."
-        echo "postfix postfix/main_mailer_type select No configuration" | debconf-set-selections
-        packages_to_install+=("msmtp" "msmtp-mta" "mailutils")
-    fi
-
-    run_with_spinner "Installiere ${#packages_to_install[@]} Basis-Pakete..." "apt-get install $APT_OPTIONS ${packages_to_install[*]}"
-    
-    if ! run_with_spinner "Installiere zusätzliche AppArmor-Profile..." "timeout 60 apt-get install $APT_OPTIONS apparmor-profiles-extra"; then
-        log_warn "Installation der AppArmor-Profile übersprungen (Timeout)."
-    fi
-
-    # --- Moderne yq-Version installieren (Go-basiert) ---
-    log_info "     -> Installiere yq (YAML-Processor)..."
-    
-    # Entferne alte Python-Version falls vorhanden
-    pip3 uninstall -y yq 2>/dev/null || true
-    
-    # Installiere Go-Version
-    if run_with_spinner "Lade yq..." "wget -q https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64 -O /usr/local/bin/yq && chmod +x /usr/local/bin/yq"; then
-        log_ok "yq installiert"
-    else
-        log_warn "yq-Installation fehlgeschlagen"
-    fi
-
-
-    # --- Phase 4/7: Mail-System Konfiguration ---
-    if [ "$ENABLE_SYSTEM_MAIL" = "ja" ]; then
-        log_info "  -> 4/7: Konfiguriere Mail-System..."
-        update-alternatives --install /usr/sbin/sendmail sendmail /usr/bin/msmtp 25
-        update-alternatives --set sendmail /usr/bin/msmtp
-        log_ok "msmtp als systemweite sendmail-Alternative konfiguriert."
-    else
-        log_info "  -> 4/7: Mail-System-Konfiguration übersprungen (deaktiviert)."
-    fi
-    
-    # --- Phase 5/7: Swap-Konfiguration ---
-    log_info "  -> 5/7: Konfiguriere Swap-Speicher..."
+    # --- Phase 4/5: Swap-Konfiguration ---------------------------------------------
+    log_info "  -> 4/5: Konfiguriere Swap-Speicher..."
     if ! swapon --show | grep -q /swapfile; then
         run_with_spinner "Erstelle 2GB Swap-Datei..." \
             "fallocate -l 2G /swapfile && chmod 600 /swapfile && mkswap /swapfile && swapon /swapfile"
-        echo '/swapfile none swap sw 0 0' >> /etc/fstab
-    else
-        log_info "Swap-Datei existiert bereits."
-    fi
-    
-    # --- Phase 6/7: Docker-Setup (falls Container-Server) ---
-    if [ "$SERVER_ROLE" = "1" ]; then
-        log_info "  -> 6/7: Installiere Docker-Engine..."
-        # Konfiguriere iptables-nft Backend für Docker-Kompatibilität
-        setup_iptables_nft_backend
-      
-        install -m 0755 -d /etc/apt/keyrings
-        if [ ! -f /etc/apt/keyrings/docker.gpg ]; then
-            run_with_spinner "Füge Docker GPG-Schlüssel hinzu..." \
-                "curl -fsSL https://download.docker.com/linux/$OS_ID/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg"
+        if ! grep -qE '^\s*/swapfile\s' /etc/fstab; then
+            echo '/swapfile none swap sw 0 0' >> /etc/fstab
         fi
-        
-        if [ ! -f /etc/apt/sources.list.d/docker.list ]; then
-            echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/$OS_ID $OS_VERSION_CODENAME stable" > /etc/apt/sources.list.d/docker.list
-            run_with_spinner "Aktualisiere Paketlisten für Docker Repository..." "apt-get update -qq"
-            log_ok "Docker Repository hinzugefügt."
-        fi
-        
-        local docker_packages=("docker-ce" "docker-ce-cli" "containerd.io" "docker-buildx-plugin" "docker-compose-plugin")
-        run_with_spinner "Installiere Docker-Pakete..." "apt-get install -y ${docker_packages[*]}"
-        
-        usermod -aG docker "$ADMIN_USER"
-        log_ok "'$ADMIN_USER' zur Docker-Gruppe hinzugefügt."
-        
-        systemctl disable --now docker >/dev/null 2>&1 || true
-        log_info "Docker-Engine installiert (Service wird später konfiguriert)."
-    
+        log_ok "Swap-Datei eingerichtet und in fstab eingetragen."
     else
-        log_info "  -> 6/7: Docker-Setup übersprungen (Einfacher Server)."
+        log_info "Swap-Datei existiert bereits – überspringe."
     fi
 
-    # GeoIP-Komponenten prüfen (falls aktiviert)
-    if [ "${ENABLE_GEOIP_BLOCKING:-nein}" = "ja" ]; then
-        log_info "     -> Prüfe GeoIP-Management-Tools..."
-        
-        # Prüfe ob die Tools vorhanden sind
-        local missing_tools=()
-        
-        if [ ! -x "/usr/local/bin/geoip-manager" ] && [ ! -f "./components/geoip-manager" ]; then
-            missing_tools+=("geoip-manager")
-        fi
-        
-        if [ ! -x "/usr/local/bin/update-geoip-sets" ] && [ ! -f "./components/update-geoip-sets" ]; then
-            missing_tools+=("update-geoip-sets")
-        fi
-        
-        if [ ${#missing_tools[@]} -gt 0 ]; then
-            log_error "Fehlende GeoIP-Tools: ${missing_tools[*]}"
-            log_error "Diese sollten durch das install.sh bereits vorhanden sein!"
-            exit 1
-        fi
-        
-        # Kopiere lokale Components nach /usr/local/bin (falls nicht bereits dort)
-        for tool in "geoip-manager" "update-geoip-sets"; do
-            if [ -f "./components/$tool" ] && [ ! -x "/usr/local/bin/$tool" ]; then
-                cp "./components/$tool" "/usr/local/bin/"
-                chmod 750 "/usr/local/bin/$tool"
-                chown root:sudo "/usr/local/bin/$tool"
-                log_ok "     ✅ $tool nach /usr/local/bin/ installiert"
-            fi
-        done
-    fi
-    
-    # Weitere Komponenten direkt hier hinzufügen:
-    # if [ "$SERVER_ROLE" = "1" ]; then
-    #     log_info "     -> Docker-Komponenten..."
-    #     if run_with_spinner "Download docker-setup.sh..." "curl -fsSL '$COMPONENTS_BASE_URL/docker-setup.sh' -o '/usr/local/bin/docker-setup.sh'"; then
-    #         chmod 770 "/usr/local/bin/docker-setup.sh"
-    #         chown root:sudo "/usr/local/bin/docker-setup.sh"
-    #     fi
-    # fi
-
-   log_ok "Modul Basis-System-Setup erfolgreich abgeschlossen."  
+    # --- Phase 5/5: Abschluss -------------------------------------------------------
+    log_ok "Modul Basis-System-Setup erfolgreich abgeschlossen."
 }
