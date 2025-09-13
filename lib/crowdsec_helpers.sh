@@ -30,28 +30,66 @@ setup_crowdsec_bouncer() {
 }
 
 ##
-# CrowdSec aus Debian Trixie-Repos
+# Installiert CrowdSec für Debian Trixie aus offiziellen Repositories
 ##
 install_crowdsec_for_trixie() {
-    log_info "  -> Installiere CrowdSec aus Trixie-Repos..."
+    log_info "  -> Installiere CrowdSec aus offiziellen Trixie-Repositories..."
     install_packages_safe crowdsec crowdsec-firewall-bouncer
-    log_ok "CrowdSec aus Debian-Trixie-Repos installiert"
+    
+    # Bekannter Debian-Paket-Bug: Config-Dateien fehlen manchmal
+    if [ ! -f "/etc/crowdsec/config.yaml" ] || [ ! -d "/etc/crowdsec" ]; then
+        log_warn "Debian-Paket-Bug erkannt - führe Cleanup-Neuinstallation durch..."
+        apt-get remove --purge crowdsec crowdsec-firewall-bouncer 2>/dev/null || true
+        rm -rf /etc/crowdsec /var/lib/crowdsec 2>/dev/null || true
+        install_packages_safe crowdsec crowdsec-firewall-bouncer
+        
+        if [ ! -f "/etc/crowdsec/config.yaml" ]; then
+            log_error "CrowdSec-Installation fehlgeschlagen - auch nach Cleanup"
+            return 1
+        fi
+        log_ok "CrowdSec nach Cleanup erfolgreich installiert"
+    else
+        log_ok "CrowdSec aus offiziellen Debian-Repositories installiert"
+    fi
 }
 
 ##
-# CrowdSec für Bookworm (optional externes Repo)
+# Installiert CrowdSec für Debian Bookworm (mit Wahlmöglichkeit)
 ##
 install_crowdsec_for_bookworm() {
     log_info "  -> Installiere CrowdSec für Bookworm..."
+    
     if [ "${CROWDSEC_USE_OFFICIAL_REPO:-true}" = "true" ]; then
-        log_info "     📦 Nutze offizielle Bookworm-Repos"
+        log_info "     📦 Nutze offizielle Bookworm-Repositories (v1.4.6-6~deb12u1)"
         install_packages_safe crowdsec crowdsec-firewall-bouncer
     else
-        log_info "     📦 Nutze packagecloud.io Repo"
+        log_info "     📦 Nutze externes packagecloud.io Repository (neueste Version)"
         setup_crowdsec_external_repository
         install_packages_safe crowdsec crowdsec-firewall-bouncer
     fi
-    log_ok "CrowdSec für Bookworm installiert"
+    
+    # Bekannter Debian-Paket-Bug: Config-Dateien fehlen manchmal
+    if [ ! -f "/etc/crowdsec/config.yaml" ] || [ ! -d "/etc/crowdsec" ]; then
+        log_warn "Debian-Paket-Bug erkannt - führe Cleanup-Neuinstallation durch..."
+        apt-get remove --purge crowdsec crowdsec-firewall-bouncer 2>/dev/null || true
+        rm -rf /etc/crowdsec /var/lib/crowdsec 2>/dev/null || true
+        
+        # Nochmal mit derselben Methode installieren
+        if [ "${CROWDSEC_USE_OFFICIAL_REPO:-true}" = "true" ]; then
+            install_packages_safe crowdsec crowdsec-firewall-bouncer
+        else
+            setup_crowdsec_external_repository
+            install_packages_safe crowdsec crowdsec-firewall-bouncer
+        fi
+        
+        if [ ! -f "/etc/crowdsec/config.yaml" ]; then
+            log_error "CrowdSec-Installation fehlgeschlagen - auch nach Cleanup"
+            return 1
+        fi
+        log_ok "CrowdSec nach Cleanup erfolgreich installiert"
+    else
+        log_ok "CrowdSec für Bookworm installiert"
+    fi
 }
 
 # nutzt detect_os_version(): gibt "os_id os_version os_codename" aus
