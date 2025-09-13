@@ -1,7 +1,7 @@
 #!/bin/bash
 ################################################################################
 #
-#  CROWDSEC-HELFER (modern, simpel, yq v4)
+#  CROWDSEC-HELFER (modern, simpel, yq v4) - ÜBERARBEITET
 #
 #  Zweck: Installation & Konfiguration von CrowdSec (LAPI) + Firewall-Bouncer
 #         im nftables "set-only"-Modus. Fokus auf Debian Bookworm & Trixie.
@@ -200,57 +200,226 @@ ensure_nftables_sets(){
 }
 
 # -----------------------------------------------------------------------------
-# Bouncer-YAML via yq (Go v4) konfigurieren (set-only)
+# Bouncer-Config: Robuste Erstellung der .local Datei
+# -----------------------------------------------------------------------------
+find_bouncer_base_config(){
+  local candidates=(
+    "/etc/crowdsec/bouncers/crowdsec-firewall-bouncer.yaml"
+    "/etc/crowdsec/bouncers/crowdsec-firewall-bouncer.yaml.sample"
+    "/usr/share/doc/crowdsec-firewall-bouncer/config.yaml"
+    "/usr/share/doc/crowdsec-firewall-bouncer/examples/config.yaml"
+    "/usr/share/crowdsec-firewall-bouncer/config.yaml"
+    "/etc/crowdsec/crowdsec-firewall-bouncer.yaml"
+  )
+  
+  for candidate in "${candidates[@]}"; do
+    if [ -f "$candidate" ] && [ -s "$candidate" ]; then
+      echo "$candidate"
+      return 0
+    fi
+  done
+  
+  # Debug: Was ist denn überhaupt da?
+  log_debug "Suche nach verfügbaren Bouncer-Configs..."
+  find /etc /usr/share -name "*bouncer*" -name "*.yaml" 2>/dev/null | head -5 | while read f; do
+    [ -s "$f" ] && log_debug "Gefunden: $f ($(stat -c%s "$f") bytes)"
+  done
+  
+  return 1
+}
+
+create_bouncer_base_config(){
+  local localf="$1"
+  
+  log_info "Erstelle Bouncer-Basis-Config..."
+  cat > "$localf" <<'EOF'
+# CrowdSec Firewall Bouncer Configuration (Auto-generated)
+api_url: http://127.0.0.1:8080
+api_key: "placeholder-will-be-replaced"
+mode: nftables
+update_frequency: 30s
+log_level: info
+disable_ipv6: false
+
+nftables:
+  ipv4:
+    enabled: true
+    set-only: false
+    table: crowdsec
+    chain: crowdsec-chain
+  ipv6:
+    enabled: true
+    set-only: false
+    table: crowdsec6
+    chain: crowdsec6-chain
+
+blacklists_ipv4: crowdsec-blacklists
+blacklists_ipv6: crowdsec6-blacklists
+
+# Additional settings
+daemonize: true
+pid_dir: /var/run/
+log_dir: /var/log/
+log_compression: true
+log_max_size: 500
+log_max_files: 3
+EOF
+  
+  chmod 0640 "$localf"
+  log_ok "Bouncer-Basis-Config erstellt: $localf"
+}
+
+ensure_bouncer_config_exists(){
+  local dir="/etc/crowdsec/bouncers"
+  local localf="$dir/crowdsec-firewall-bouncer.yaml.local"
+  
+  [ -d "$dir" ] || install -d -m0755 "$dir"
+  
+  # Prüfe ob .local bereits existiert und gültig ist
+  if [ -f "$localf" ] && [ -s "$localf" ]; then
+    log_debug "Bouncer .local Config bereits vorhanden"
+    return 0
+  fi
+  
+  # Suche nach Original-Config zum Kopieren
+  local base_config
+  if base_config=$(find_bouncer_base_config); then
+    log_info "Kopiere Bouncer-Config von: $base_config"
+    if cp "$base_config" "$localf"; then
+      chmod 0640 "$localf"
+      log_ok "Config erfolgreich kopiert"
+      return 0
+    else
+      log_warn "Kopieren fehlgeschlagen, erstelle Template..."
+    fi
+  else
+    log_warn "Keine Original-Config gefunden, erstelle Template..."
+  fi
+  
+  # Fallback: Template erstellen
+  create_bouncer_base_config "$localf"
+}
+
+# -----------------------------------------------------------------------------
+# Überarbeitete Bouncer-Konfiguration mit yq
 # -----------------------------------------------------------------------------
 configure_bouncer_with_yq(){
   log_info "  -> Konfiguriere Bouncer-YAML mit yq (set-only)..."
+  
+  # yq installieren falls nötig
   if ! command -v yq >/dev/null 2>&1; then
-    log_info "  -> Installiere yq..."; install_packages_safe yq || { log_error "yq-Install fehlgeschlagen"; return 1; }
+    log_info "  -> Installiere yq..."
+    install_packages_safe yq || { 
+      log_error "yq-Installation fehlgeschlagen"
+      return 1
+    }
   fi
 
   local dir="/etc/crowdsec/bouncers"
-  local base="$dir/crowdsec-firewall-bouncer.yaml"
   local localf="$dir/crowdsec-firewall-bouncer.yaml.local"
   local keyfile="$dir/.api_key"
 
-  [ -d "$dir" ] || install -d -m0755 "$dir"
-  if [ ! -f "$localf" ] || [ "$base" -nt "$localf" ]; then
-    cp "$base" "$localf" 2>/dev/null || install -m0640 /dev/null "$localf"
-  fi
+  # Stelle sicher, dass eine gültige Config existiert
+  ensure_bouncer_config_exists || {
+    log_error "Konnte keine gültige Bouncer-Config erstellen"
+    return 1
+  }
 
+  # API-Key generieren falls nicht vorhanden
   if [ ! -s "$keyfile" ]; then
     install -o root -g root -m600 /dev/null "$keyfile"
     local bname="firewall-bouncer-$(hostname -s 2>/dev/null || echo default)"
+    
+    log_info "Generiere API-Key für Bouncer: $bname"
     if ! cscli bouncers add "$bname" -o raw >"$keyfile"; then
-      log_error "API-Key-Generierung fehlgeschlagen"; return 1; fi
+      log_error "API-Key-Generierung fehlgeschlagen"
+      return 1
+    fi
     log_debug "API-Key generiert ($bname)"
   fi
-  local api_key; api_key=$(tr -d '\n\r' <"$keyfile")
 
-  # YAML setzen (Bindestrich-Keys quoten)
-  API_KEY="$api_key" yq e -i '.api_key = env(API_KEY)' "$localf"
-  yq e -i '.mode = "nftables"'            "$localf"
-  yq e -i '.log_level = "info"'           "$localf"
-  yq e -i '.update_frequency = "30s"'     "$localf"
-  yq e -i '.disable_ipv6 = false'          "$localf"
-
-  yq e -i '.nftables.ipv4.enabled = true'           "$localf"
-  yq e -i '.nftables.ipv4."set-only" = true'       "$localf"
-  yq e -i '.nftables.ipv4.table = "crowdsec"'      "$localf"
-  yq e -i '.nftables.ipv4.chain = "crowdsec-chain"'"$localf"
-  yq e -i '.blacklists_ipv4 = "crowdsec-blacklists"'"$localf"
-
-  yq e -i '.nftables.ipv6.enabled = true'           "$localf"
-  yq e -i '.nftables.ipv6."set-only" = true'       "$localf"
-  yq e -i '.nftables.ipv6.table = "crowdsec6"'     "$localf"
-  yq e -i '.nftables.ipv6.chain = "crowdsec6-chain"'"$localf"
-  yq e -i '.blacklists_ipv6 = "crowdsec6-blacklists"'"$localf"
-
-  if /usr/bin/crowdsec-firewall-bouncer -c "$localf" -t >/dev/null 2>&1; then
-    log_ok "Bouncer-Konfiguration gültig"
-  else
-    log_error "Bouncer-Konfiguration fehlerhaft"; return 1
+  local api_key
+  api_key=$(tr -d '\n\r' <"$keyfile")
+  
+  # Validiere Config vor Änderung
+  if ! yq e '.api_key' "$localf" >/dev/null 2>&1; then
+    log_error "Ungültige YAML-Struktur in $localf"
+    return 1
   fi
+
+  # YAML konfigurieren (Bindestrich-Keys quoten!)
+  log_info "Setze Bouncer-Parameter..."
+  
+  API_KEY="$api_key" yq e -i '.api_key = env(API_KEY)' "$localf"
+  yq e -i '.mode = "nftables"' "$localf"
+  yq e -i '.log_level = "info"' "$localf"
+  yq e -i '.update_frequency = "30s"' "$localf"
+  yq e -i '.disable_ipv6 = false' "$localf"
+
+  # NFTables IPv4 Konfiguration
+  yq e -i '.nftables.ipv4.enabled = true' "$localf"
+  yq e -i '.nftables.ipv4."set-only" = true' "$localf"
+  yq e -i '.nftables.ipv4.table = "crowdsec"' "$localf"
+  yq e -i '.nftables.ipv4.chain = "crowdsec-chain"' "$localf"
+  yq e -i '.blacklists_ipv4 = "crowdsec-blacklists"' "$localf"
+
+  # NFTables IPv6 Konfiguration
+  yq e -i '.nftables.ipv6.enabled = true' "$localf"
+  yq e -i '.nftables.ipv6."set-only" = true' "$localf"
+  yq e -i '.nftables.ipv6.table = "crowdsec6"' "$localf"
+  yq e -i '.nftables.ipv6.chain = "crowdsec6-chain"' "$localf"
+  yq e -i '.blacklists_ipv6 = "crowdsec6-blacklists"' "$localf"
+
+  # Konfiguration validieren
+  log_info "Validiere Bouncer-Konfiguration..."
+  if /usr/bin/crowdsec-firewall-bouncer -c "$localf" -t >/dev/null 2>&1; then
+    log_ok "Bouncer-Konfiguration ist gültig (set-only aktiv)"
+  else
+    log_error "Bouncer-Konfiguration ist fehlerhaft!"
+    log_debug "Teste Config mit: /usr/bin/crowdsec-firewall-bouncer -c $localf -t"
+    return 1
+  fi
+  
+  # Zusätzliche Verifikation der kritischen Einstellungen
+  local setonly_ipv4 setonly_ipv6
+  setonly_ipv4=$(yq e '.nftables.ipv4."set-only"' "$localf")
+  setonly_ipv6=$(yq e '.nftables.ipv6."set-only"' "$localf")
+  
+  if [ "$setonly_ipv4" = "true" ] && [ "$setonly_ipv6" = "true" ]; then
+    log_ok "Set-only Modus erfolgreich aktiviert (IPv4 & IPv6)"
+  else
+    log_error "Set-only Modus nicht korrekt gesetzt (IPv4: $setonly_ipv4, IPv6: $setonly_ipv6)"
+    return 1
+  fi
+}
+
+# -----------------------------------------------------------------------------
+# Debug-Funktion für Troubleshooting
+# -----------------------------------------------------------------------------
+debug_bouncer_config(){
+  log_debug "=== BOUNCER CONFIG DEBUG ==="
+  local dir="/etc/crowdsec/bouncers"
+  
+  log_debug "Directory $dir exists: $([ -d "$dir" ] && echo "JA" || echo "NEIN")"
+  
+  if [ -d "$dir" ]; then
+    log_debug "Inhalt von $dir:"
+    ls -la "$dir" 2>/dev/null | while read line; do
+      log_debug "  $line"
+    done
+  fi
+  
+  log_debug "Suche nach Bouncer-Configs im System:"
+  find /etc /usr/share -name "*bouncer*" -name "*.yaml" 2>/dev/null | head -10 | while read f; do
+    if [ -f "$f" ]; then
+      log_debug "  $f ($(stat -c%s "$f") bytes)"
+    fi
+  done
+  
+  log_debug "Bouncer-Package installiert:"
+  dpkg -l | grep -i bouncer || log_debug "  Kein Bouncer-Package gefunden"
+  
+  log_debug "=== END DEBUG ==="
 }
 
 # -----------------------------------------------------------------------------
@@ -420,4 +589,50 @@ on_success: break
 EOF
   chmod 0640 "$f" 2>/dev/null || true
   log_ok "Custom SSH-Profile mit Ban-Dauer '${bantime}' erstellt"
+}
+
+# -----------------------------------------------------------------------------
+# Zusätzliche Hilfsfunktionen für Troubleshooting
+# -----------------------------------------------------------------------------
+crowdsec_status_check(){
+  log_info "🔍 CrowdSec Status-Check..."
+  
+  echo "=== Services ==="
+  systemctl status crowdsec --no-pager -l || true
+  systemctl status crowdsec-bouncer-setonly --no-pager -l || true
+  
+  echo -e "\n=== API Health ==="
+  cscli metrics 2>/dev/null || echo "API nicht erreichbar"
+  
+  echo -e "\n=== Bouncer Status ==="
+  cscli bouncers list 2>/dev/null || echo "Keine Bouncer registriert"
+  
+  echo -e "\n=== NFTables Sets ==="
+  nft list set ip crowdsec crowdsec-blacklists 2>/dev/null || echo "IPv4 Set nicht gefunden"
+  nft list set ip6 crowdsec6 crowdsec6-blacklists 2>/dev/null || echo "IPv6 Set nicht gefunden"
+  
+  echo -e "\n=== Config Files ==="
+  local localf="/etc/crowdsec/bouncers/crowdsec-firewall-bouncer.yaml.local"
+  if [ -f "$localf" ]; then
+    echo "Bouncer Config exists: YES ($(stat -c%s "$localf") bytes)"
+    yq e '.nftables.ipv4."set-only"' "$localf" 2>/dev/null | grep -q "true" && echo "Set-only IPv4: YES" || echo "Set-only IPv4: NO"
+    yq e '.nftables.ipv6."set-only"' "$localf" 2>/dev/null | grep -q "true" && echo "Set-only IPv6: YES" || echo "Set-only IPv6: NO"
+  else
+    echo "Bouncer Config: MISSING"
+  fi
+}
+
+# Schnelle Installation mit Status-Check
+install_crowdsec_complete(){
+  log_info "🚀 Starte komplette CrowdSec-Installation..."
+  
+  if install_crowdsec_stack; then
+    log_ok "Installation erfolgreich abgeschlossen!"
+    sleep 2
+    crowdsec_status_check
+  else
+    log_error "Installation fehlgeschlagen!"
+    debug_bouncer_config
+    return 1
+  fi
 }
