@@ -6,6 +6,7 @@
 # MIT © Markus F. (TZERO78) & KI-Assistenten
 ################################################################################
 set -Eeuo pipefail
+set -x # Debugging
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd -- "$SCRIPT_DIR/.." && pwd)"
