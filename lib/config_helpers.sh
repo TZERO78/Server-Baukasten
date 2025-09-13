@@ -287,8 +287,10 @@ load_config_from_file() {
   validate_config
 
   # Schritt 5: Cleanup
-  log_debug "Schritt 4/4: Cleanup (entferne temporäre Datei: $temp_config)"
-  rm -f "$temp_config"
+	log_debug "Schritt 4/4: Cleanup (sicheres Löschen der temporären Datei: $temp_config)"
+	if [ -f "$temp_config" ]; then
+		shred -u "$temp_config" 2>/dev/null || rm -f "$temp_config"
+	fi
 
   log_ok "🎉 Konfiguration erfolgreich geladen und validiert!"
 }

@@ -239,7 +239,7 @@ run_setup() {
     # ═══════════════════════════════════════════════════════════════════════════
     log_info "Phase 1/5: Vorbereitung & System-Grundlagen..."
     
-    pre_flight_checks
+    module_prepare_install
     load_config_from_file "$CONFIG_FILE"
     
     # Interface-Detection NACH Config-Load (für NAT-Regeln später)
