@@ -342,6 +342,13 @@ configure_bouncer() {
         log_error "Voraussetzung nicht erfüllt: CrowdSec-Service läuft nicht"
         return 1
     fi
+
+	# Im Script prüfen und reparieren:
+	if dpkg --verify crowdsec-firewall-bouncer 2>&1 | grep -q "missing"; then
+		log_info "Repariere beschädigte Paket-Installation..."
+		apt-get install --reinstall crowdsec-firewall-bouncer
+	fi
+
     
     if ! cscli metrics >/dev/null 2>&1; then
         log_error "Voraussetzung nicht erfüllt: CrowdSec API ist nicht erreichbar"
