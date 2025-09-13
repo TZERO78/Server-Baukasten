@@ -54,6 +54,41 @@ install_crowdsec_for_bookworm() {
     log_ok "CrowdSec für Bookworm installiert"
 }
 
+# nutzt detect_os_version(): gibt "os_id os_version os_codename" aus
+install_crowdsec_by_detected_os() {
+  local os_id os_version os_codename
+  # robust lesen + normalisieren (lowercase, whitespace raus)
+  read -r os_id os_version os_codename < <(detect_os_version)
+  os_id="${os_id,,}"; os_codename="${os_codename,,}"
+  os_id="${os_id//[[:space:]]/}"; os_codename="${os_codename//[[:space:]]/}"
+
+  log_info "  -> Erkannter Host: id='${os_id}' version='${os_version}' codename='${os_codename}'"
+
+  case "${os_id}:${os_codename}" in
+    debian:trixie)
+      log_info "Debian Trixie erkannt – nutze **offizielle Debian-Pakete** (kein externes Repo)."
+      install_crowdsec_for_trixie
+      ;;
+
+    debian:bookworm)
+      log_info "Debian Bookworm erkannt."
+      install_crowdsec_for_bookworm    # darf optional externes Repo nutzen, je nach Flag in deiner Funktion
+      ;;
+
+    debian:*)
+      log_warn "Debian, aber unbekannter Codename: '${os_codename}' – nutze Fallback (externes Repo)."
+      setup_crowdsec_external_repository
+      install_packages_safe crowdsec crowdsec-firewall-bouncer
+      ;;
+
+    *)
+      log_warn "Nicht-Debian oder unbekanntes OS ('${os_id}'). Versuche Fallback über externes Repo."
+      setup_crowdsec_external_repository
+      install_packages_safe crowdsec crowdsec-firewall-bouncer
+      ;;
+  esac
+}
+
 ##
 # Externes CrowdSec-Repo einrichten
 ##
@@ -191,14 +226,12 @@ EOF
 ##
 install_crowdsec_stack() {
     log_info "⚙️  Installiere CrowdSec-Stack..."
-    local version
-    version=$(lsb_release -cs 2>/dev/null || . /etc/os-release && echo "${VERSION_CODENAME:-unknown}")
 
-    case "$version" in
-        trixie) install_crowdsec_for_trixie ;;
-        bookworm) install_crowdsec_for_bookworm ;;
-        *) log_warn "Unbekannte Debian-Version: $version"; setup_crowdsec_external_repository; install_packages_safe crowdsec crowdsec-firewall-bouncer ;;
-    esac
+    # OS erkennen und CrowdSec installieren
+    install_crowdsec_by_detected_os || {
+        log_error "CrowdSec-Installation fehlgeschlagen"
+        return 1
+    }
 
     # CrowdSec Service fixen
     mkdir -p /etc/systemd/system/crowdsec.service.d
