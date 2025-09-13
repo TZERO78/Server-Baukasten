@@ -3,7 +3,7 @@
 # APT-REPAIR HELPER (Universal & Vereinfacht)
 # @description: Löst Mixed-Release-Probleme bei ALLEN VPS-Providern universal
 # @license:     MIT
-# @version:     3.0.0
+# @version:     3.0.1
 ################################################################################
 set -Eeuo pipefail
 
