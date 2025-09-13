@@ -342,13 +342,6 @@ configure_bouncer() {
         log_error "Voraussetzung nicht erfüllt: CrowdSec-Service läuft nicht"
         return 1
     fi
-
-	# Im Script prüfen und reparieren:
-	if dpkg --verify crowdsec-firewall-bouncer 2>&1 | grep -q "missing"; then
-		log_info "Repariere beschädigte Paket-Installation..."
-		apt-get install --reinstall crowdsec-firewall-bouncer
-	fi
-
     
     if ! cscli metrics >/dev/null 2>&1; then
         log_error "Voraussetzung nicht erfüllt: CrowdSec API ist nicht erreichbar"
@@ -366,6 +359,19 @@ configure_bouncer() {
     fi
     
     log_ok "Voraussetzungen erfüllt: CrowdSec-Service, API, NFTables und yq verfügbar"
+
+    # --- 2. Paket-Integrität prüfen und reparieren ---   <-- HIER
+    log_info "  -> Prüfe Bouncer-Paket-Integrität..."
+    if dpkg --verify crowdsec-firewall-bouncer 2>&1 | grep -q "missing"; then
+        log_warn "Beschädigte Paket-Installation erkannt - repariere..."
+        if ! run_with_spinner "Repariere Bouncer-Paket..." "DEBIAN_FRONTEND=noninteractive apt-get install --reinstall -y crowdsec-firewall-bouncer >/dev/null 2>&1"; then
+            log_error "Paket-Reparatur fehlgeschlagen"
+            return 1
+        fi
+        log_ok "Paket-Integrität wiederhergestellt"
+    else
+        log_debug "Paket-Integrität in Ordnung"
+    fi
 
     # --- 2. Konfigurationsdateien vorbereiten ---
     local dir="/etc/crowdsec/bouncers"
