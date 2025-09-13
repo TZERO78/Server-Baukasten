@@ -278,7 +278,8 @@ install_packages_safe() {
   local failed=()
   for p in "${todo[@]}"; do
     dpkg -s "$p" >/dev/null 2>&1 && { log_debug "  -> $p bereits installiert"; continue; }
-    if ! DEBIAN_FRONTEND=noninteractive apt_cmd install -y --no-install-recommends --allow-downgrades "$p"; then
+    # FIX: apt_cmd -> apt-get
+    if ! DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends --allow-downgrades "$p"; then
       log_warn "  -> fehlgeschlagen: $p"; failed+=("$p")
     else
       log_ok "  -> installiert: $p"
