@@ -1,257 +1,221 @@
 #!/bin/bash
 ################################################################################
+#
 # IDEMPOTENT HELPERS
 #
-# @description: Release-agnostische Helfer für Paket-, Service- und Datei-Tasks,
-#               mit sanften Fallbacks und ohne Hardcoding von Codenames.
-# @author:      Server-Baukasten (TZERO78) & KI-Assistenten
+# @description: Kleine, robuste Bausteine für wiederholbare (idempotente)
+#               Datei-/System- und APT-Operationen.
+# @author:      Server-Baukasten (TZERO78) & KI
 # @license:     MIT
-# @version:     1.0.0
+# @version:     1.2.0
+#
 ################################################################################
 
 set -Eeuo pipefail
 
-# ──────────────────────────────────────────────────────────────────────────────
-# Logging-Fallbacks (falls kein log_helper geladen ist)
-# ──────────────────────────────────────────────────────────────────────────────
+# --- Logging-Fallbacks --------------------------------------------------------
 if ! command -v log_info >/dev/null 2>&1; then
-  log_info()  { printf '%b\n' "ℹ️  $*"; }
-  log_ok()    { printf '%b\n' "✅ $*"; }
-  log_warn()  { printf '%b\n' "⚠️  $*"; }
-  log_error() { printf '%b\n' "❌ $*" >&2; }
+  log_info()  { printf 'ℹ️  %s\n' "$*"; }
+  log_ok()    { printf '✅ %s\n' "$*"; }
+  log_warn()  { printf '⚠️  %s\n' "$*"; }
+  log_error() { printf '❌ %s\n' "$*" >&2; }
 fi
 if ! command -v log_debug >/dev/null 2>&1; then
-  log_debug() { [ "${DEBUG:-false}" = "true" ] && printf '%b\n' "🐞  $*" >&2 || true; }
+  log_debug() { [ "${DEBUG:-false}" = "true" ] && printf '🐞  %s\n' "$*" >&2 || true; }
 fi
 
-# ──────────────────────────────────────────────────────────────────────────────
-# Kleine Utils
-# ──────────────────────────────────────────────────────────────────────────────
+# --- Mini-Utils ---------------------------------------------------------------
 _has() { command -v "$1" >/dev/null 2>&1; }
 
-# Minimaler Spinner-Fallback (nur wenn run_with_spinner fehlt)
-if ! command -v run_with_spinner >/dev/null 2>&1; then
-  run_with_spinner() {
-    # $1: Titel, $2: Kommando
-    local title="$1" cmd="$2"
+# Nutze vorhandenen Spinner, sonst direkt ausführen
+_run() {
+  local title="$1"; shift
+  local cmd="$*"
+  if command -v run_with_spinner >/dev/null 2>&1; then
+    run_with_spinner "$title" "$cmd"
+  else
     log_info "$title"
-    if eval "$cmd"; then
-      log_ok "$title: Erfolg!"
-      return 0
-    else
-      log_error "$title: Fehlgeschlagen!"
-      return 1
-    fi
-  }
-fi
-
-# ──────────────────────────────────────────────────────────────────────────────
-# OS/Codename ermitteln (release-agnostisch)
-# ──────────────────────────────────────────────────────────────────────────────
-os_release() {
-  local id="unknown" codename="unknown"
-  if [ -r /etc/os-release ]; then
-    # shellcheck disable=SC1091
-    . /etc/os-release
-    id="${ID:-$id}"
-    codename="${VERSION_CODENAME:-$codename}"
+    eval "$cmd"
   fi
-  printf '%s %s\n' "$id" "$codename"
 }
 
-# ──────────────────────────────────────────────────────────────────────────────
-# APT/DPKG Locks warten (nur wenn apt_repair_helpers nicht geladen)
-# ──────────────────────────────────────────────────────────────────────────────
-apt_wait_for_locks_local() {
-  local tries=30
-  while (( tries-- > 0 )); do
-    if command -v fuser >/dev/null 2>&1 && {
-         fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1 ||
-         fuser /var/lib/apt/lists/lock >/dev/null 2>&1 ||
-         fuser /var/cache/apt/archives/lock >/dev/null 2>&1 ; } ; then
-      log_debug "    - Warte auf APT-Locks… ($((30-tries))/30)"
-      sleep 2
-    else
-      return 0
-    fi
-  done
-  log_warn "APT-Locks hängen ungewöhnlich lang – versuche 'dpkg --configure -a'."
-  dpkg --configure -a || true
-}
-
-apt_wait_for_locks_wrapper() {
+# Warte auf APT/DPKG-Locks (falls Funktion aus apt_repair_helpers vorhanden ist)
+_apt_wait() {
   if command -v apt_wait_for_locks >/dev/null 2>&1; then
     apt_wait_for_locks
+  fi
+}
+
+# ------------------------------------------------------------------------------
+# Dateisystem – idempotente Helfer
+# ------------------------------------------------------------------------------
+
+# Stellt sicher, dass ein Verzeichnis existiert (Owner/Mode optional).
+ensure_dir() {
+  local path="$1" owner="${2:-root:root}" mode="${3:-0755}"
+  if [ ! -d "$path" ]; then
+    log_debug "ensure_dir: Erstelle Verzeichnis $path (owner=$owner mode=$mode)"
+    install -o "${owner%:*}" -g "${owner#*:}" -m "$mode" -d "$path"
   else
-    apt_wait_for_locks_local
+    log_debug "ensure_dir: Verzeichnis existiert bereits: $path"
+    # Owner/Mode ggf. korrigieren
+    chown "$owner" "$path"
+    chmod "$mode" "$path"
   fi
 }
 
-# ──────────────────────────────────────────────────────────────────────────────
-# APT: Paketverfügbarkeit / Alternativen / Installation
-# ──────────────────────────────────────────────────────────────────────────────
-
-# Prüfen, ob ein Paket im aktuellen Release eine Candidate-Version hat
-apt_pkg_available() {
-  apt-cache policy "$1" 2>/dev/null | awk '/Candidate:/ {print $2}' | grep -vq '(none)'
-}
-
-# Bekannte Umbenennungen/Alternativen ohne Release-Hardcodes
-# – nur wenn Hauptname nicht verfügbar ist
-pkg_alternatives() {
-  case "$1" in
-    # dns tools
-    bind9-dnsutils) echo "dnsutils" ;;
-    # https transport (alt)
-    apt-transport-https) echo "apt" ;;
-    # apparmor-utils ist teils im metapaket aufgegangen
-    apparmor-utils) echo "apparmor" ;;
-    # geoip-bin teils ersetzt/entfallen → lassen wir leer (wird ggf. geskippt)
-    # tmux Versionskonflikte behebt apt selbst, keine Alt nötig
-    *) : ;;
-  esac
-}
-
-# Ermittelt die erste installierbare Wahl aus Hauptpaket + Alternativen
-pkg_resolve_one() {
-  local name="$1"; shift || true
-  if apt_pkg_available "$name"; then
-    echo "$name"; return 0
+# Stellt sicher, dass eine Datei existiert (Owner/Mode optional).
+ensure_file() {
+  local path="$1" owner="${2:-root:root}" mode="${3:-0644}"
+  if [ ! -f "$path" ]; then
+    log_debug "ensure_file: Erstelle Datei $path (owner=$owner mode=$mode)"
+    install -o "${owner%:*}" -g "${owner#*:}" -m "$mode" /dev/null "$path"
+  else
+    log_debug "ensure_file: Datei existiert bereits: $path"
+    chown "$owner" "$path"
+    chmod "$mode" "$path"
   fi
-  local alt
-  for alt in "$@"; do
-    if apt_pkg_available "$alt"; then
-      echo "$alt"; return 0
-    fi
-  done
-  return 1
 }
 
-# Führt ein apt-get update (leise) aus, wenn sinnvoll.
-apt_update_quick() {
-  apt_wait_for_locks_wrapper
-  apt-get -o DPkg::Lock::Timeout=60 update -qq
+# Fügt eine *exakte* Zeile hinzu, falls noch nicht vorhanden.
+ensure_line() {
+  local line="$1" file="$2"
+  ensure_file "$file"
+  if ! grep -qxF -- "$line" "$file" 2>/dev/null; then
+    log_debug "ensure_line: Füge Zeile hinzu in $file: $line"
+    printf '%s\n' "$line" >> "$file"
+  else
+    log_debug "ensure_line: Zeile bereits vorhanden in $file"
+  fi
 }
 
-# Idempotente Installation: wählt dynamisch Alternativen & skipt nicht verfügbare
-install_packages_safe() {
-  local id codename; read -r id codename < <(os_release)
+# Ersetzt/erzwingt KEY<sep>VALUE in einfacher KEY=VALUE-Datei.
+# - legt Parent-Verzeichnis & Datei an (falls nötig)
+# - sichert die Datei, wenn backup_and_register() existiert
+# - escaped korrekt (Regex + Replacement), inkl. Sonderzeichen in SEP und VALUE
+# - ersetzt vorhandenen Eintrag (am Zeilenanfang, ggf. mit Whitespaces) oder hängt an
+ensure_kv() {
+  local file="$1" key="$2" val="$3" sep="${4:-=}"
 
-  # Falls Default-Release gesetzt wurde, respektieren
-  local apt_def_rel_opt=()
-  if [ -f /etc/apt/apt.conf.d/90defaultrelease ]; then
-    apt_def_rel_opt=(-o "APT::Default-Release=$codename")
+  # Guard
+  if [ -z "${file:-}" ] || [ -z "${key:-}" ]; then
+    log_error "ensure_kv: fehlende Parameter (file/key)"; return 1
   fi
 
-  local wants=("$@") n alts choice
-  local resolved=() skipped=()
-
-  # Vorher einmal schnell update (schadet nicht)
-  apt_update_quick || true
-
-  for n in "${wants[@]}"; do
-    # Bereits installiert?
-    if dpkg -s "$n" >/dev/null 2>&1; then
-      log_debug "✓ $n bereits installiert"
-      continue
-    fi
-    # Alternativen ermitteln
-    read -r -a alts <<<"$(pkg_alternatives "$n")"
-    if choice="$(pkg_resolve_one "$n" "${alts[@]}")"; then
-      # Doppelungen vermeiden
-      if [[ ! " ${resolved[*]} " =~ " ${choice} " ]]; then
-        resolved+=("$choice")
-      fi
-    else
-      log_warn "Paket im Release nicht verfügbar: $n"
-      skipped+=("$n")
-    fi
-  done
-
-  if [ ${#resolved[@]} -eq 0 ]; then
-    log_ok "Alle gewünschten Pakete sind bereits installiert oder entfallen: ${skipped[*]:-—}"
-    return 0
+  # Datei & Parent-Dir sicherstellen
+  if command -v ensure_dir >/dev/null 2>&1; then
+    ensure_dir "$(dirname "$file")"
+  else
+    mkdir -p -- "$(dirname "$file")"
+  fi
+  if command -v ensure_file >/dev/null 2>&1; then
+    ensure_file "$file"
+  else
+    [ -f "$file" ] || install -m 0644 /dev/null "$file"
   fi
 
-  export DEBIAN_FRONTEND=noninteractive
-  run_with_spinner "Installiere ${#resolved[@]} Pakete…" \
-    apt-get "${apt_def_rel_opt[@]}" -o Dpkg::Options::=--force-confdef \
-                                   -o Dpkg::Options::=--force-confold \
-                                   --no-install-recommends -y install "${resolved[@]}"
-}
-
-# Idempotente Entfernung (purge) einer Paketliste.
-purge_packages_safe() {
-  local to_purge=() p
-  for p in "$@"; do
-    dpkg -s "$p" >/dev/null 2>&1 && to_purge+=("$p")
-  done
-  [ ${#to_purge[@]} -eq 0 ] && { log_info "Keine Pakete zu purgen."; return 0; }
-  run_with_spinner "Entferne Pakete (purge)..." \
-    "apt-get -y --purge autoremove ${to_purge[*]} && apt-get -y autoclean"
-}
-
-# ──────────────────────────────────────────────────────────────────────────────
-# systemd: Idempotente Service-Operationen
-# ──────────────────────────────────────────────────────────────────────────────
-systemctl_enable_now_safe() {
-  local unit="$1"
-  systemctl is-enabled "$unit" >/dev/null 2>&1 || systemctl enable "$unit"
-  systemctl is-active  "$unit" >/dev/null 2>&1 || systemctl start  "$unit"
-}
-
-systemctl_disable_mask_safe() {
-  local unit="$1"
-  systemctl is-active "$unit"  >/dev/null 2>&1 && systemctl stop  "$unit"
-  systemctl is-enabled "$unit" >/dev/null 2>&1 && systemctl disable "$unit"
-  systemctl is-enabled "$unit" >/dev/null 2>&1 || systemctl mask "$unit" || true
-}
-
-# ──────────────────────────────────────────────────────────────────────────────
-# Dateien/Symlinks: Idempotente Helfer
-# ──────────────────────────────────────────────────────────────────────────────
-write_file_if_changed() {
-  # $1: Zieldatei, $2: Inhalt (String)
-  local dest="$1" content="$2"
-  local tmp; tmp="$(mktemp)"
-  printf '%s' "$content" > "$tmp"
-
-  # Optional: Backup registrieren, wenn Funktion existiert
-  if command -v backup_and_register >/dev/null 2>&1; then
-    backup_and_register "$dest"
-  fi
-
-  if [ -f "$dest" ] && cmp -s "$tmp" "$dest"; then
-    log_debug "Unverändert: $dest"
-    rm -f "$tmp"
-    return 0
-  fi
-  install -m 0644 -o root -g root "$tmp" "$dest"
-  rm -f "$tmp"
-  log_ok "Aktualisiert: $dest"
-}
-
-ensure_line_in_file() {
-  # $1: Datei, $2: Regex (ohne Delimiter), $3: Zeile (ganzer Text)
-  local file="$1" pattern="$2" line="$3"
-  touch "$file"
-  grep -Eq "$pattern" "$file" && { log_debug "Zeile bereits vorhanden in $file"; return 0; }
+  # Optionales Backup registrieren
   if command -v backup_and_register >/dev/null 2>&1; then
     backup_and_register "$file"
   fi
-  printf '%s\n' "$line" >> "$file"
-  log_ok "Zeile ergänzt in $file"
+
+  # Key/Separator für REGEX escapen
+  # (WICHTIG: schließende eckige Klammer zuerst in der sed-Char-Class)
+  local escaped_key escaped_sep
+  escaped_key="$(printf '%s' "$key" | sed -e 's/[][\.^$*+?{}|()]/\\&/g')"
+  escaped_sep="$(printf '%s' "$sep" | sed -e 's/[][\.^$*+?{}|()]/\\&/g')"
+
+  # Replacement-Anteil (& und \ müssen escaped werden)
+  local key_rep sep_rep val_rep
+  key_rep="$(printf '%s' "$key" | sed -e 's/[&\\]/\\&/g')"
+  sep_rep="$(printf '%s' "$sep" | sed -e 's/[&\\]/\\&/g')"
+  val_rep="$(printf '%s' "$val" | sed -e 's/[&\\]/\\&/g')"
+
+  # Existiert ein (nicht-kommentierter) Key bereits?
+  if grep -qE "^[[:space:]]*${escaped_key}[[:space:]]*${escaped_sep}" "$file"; then
+    log_debug "ensure_kv: Ersetze '${key}${sep}…' in $file"
+    # ersetze die *erste* passende Zeile (Anfang der Zeile, evtl. Whitespaces vor KEY)
+    sed -i -E "s|^[[:space:]]*${escaped_key}[[:space:]]*${escaped_sep}.*|${key_rep}${sep_rep}${val_rep}|" "$file"
+  else
+    log_debug "ensure_kv: Füge '${key}${sep}${val}' ans Ende von $file an"
+    printf '%s%s%s\n' "$key" "$sep" "$val" >> "$file"
+  fi
 }
 
-ensure_symlink() {
-  # $1: Linkpfad, $2: Ziel
-  local link="$1" target="$2"
-  if [ -L "$link" ] && [ "$(readlink -f "$link")" = "$(readlink -f "$target")" ]; then
-    log_debug "Symlink ok: $link -> $target"
+
+# ------------------------------------------------------------------------------
+# APT – idempotente Helfer
+# ------------------------------------------------------------------------------
+
+# Setzt APT Default-Release, z. B. "trixie", um Suite-Mischungen zu vermeiden.
+ensure_default_release() {
+  local codename="$1"
+  local conf="/etc/apt/apt.conf.d/00default-release"
+  [ -n "$codename" ] || { log_warn "ensure_default_release: Kein Codename übergeben – überspringe."; return 0; }
+
+  if [ -f "$conf" ] && grep -q "APT::Default-Release \"$codename\";" "$conf"; then
+    log_debug "ensure_default_release: Bereits gesetzt auf '$codename'."
     return 0
   fi
-  rm -f "$link"
-  ln -s "$target" "$link"
-  log_ok "Symlink gesetzt: $link -> $target"
+
+  log_debug "ensure_default_release: Setze Default-Release auf '$codename'."
+  printf 'APT::Default-Release "%s";\n' "$codename" > "$conf"
 }
-# Ende ─────────────────────────────────────────────────────────────────────────
+
+# Prüft per dpkg -s, ob ein Paket installiert ist.
+is_installed() {
+  dpkg -s "$1" >/dev/null 2>&1
+}
+
+# Filtert eine Paketliste und gibt nur die *fehlenden* Pakete auf STDOUT aus.
+missing_packages() {
+  local p
+  for p in "$@"; do
+    if ! is_installed "$p"; then
+      echo "$p"
+    fi
+  done
+}
+
+# Apt-Update leise (mit Lock-Wait)
+apt_update_quiet() {
+  _apt_wait
+  _run "Paketlisten aktualisieren..." "apt-get update -qq"
+}
+
+# Installiert Pakete robust und idempotent (Update + Install + Fallback pro Paket).
+install_packages_safe() {
+  local pkgs=("$@")
+  [ ${#pkgs[@]} -gt 0 ] || { log_info "Keine Pakete angefordert – überspringe Installation."; return 0; }
+
+  log_debug "install_packages_safe: Anforderung ${#pkgs[@]} Pakete: ${pkgs[*]}"
+
+  apt_update_quiet
+
+  _apt_wait
+  local APT_OPTS=(-y -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold)
+  if DEBIAN_FRONTEND=noninteractive apt-get install "${APT_OPTS[@]}" --no-install-recommends "${pkgs[@]}"; then
+    log_ok "Pakete installiert: ${pkgs[*]}"
+    return 0
+  fi
+
+  log_warn "Gesamte Installation fehlgeschlagen – versuche Einzelpakete zur Eingrenzung…"
+  local failed=() ok=()
+  for p in "${pkgs[@]}"; do
+    _apt_wait
+    if DEBIAN_FRONTEND=noninteractive apt-get install "${APT_OPTS[@]}" --no-install-recommends "$p"; then
+      ok+=("$p")
+    else
+      failed+=("$p")
+    fi
+  done
+
+  if [ ${#failed[@]} -gt 0 ]; then
+    log_error "Folgende Pakete ließen sich nicht installieren: ${failed[*]}"
+    log_debug "Erfolgreich installiert: ${ok[*]:-keine}"
+    return 1
+  fi
+
+  log_ok "Alle Pakete erfolgreich installiert (Einzelläufe)."
+  return 0
+}
