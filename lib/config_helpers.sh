@@ -7,7 +7,7 @@
 # @author:      Markus F. (TZERO78) & KI-Assistenten
 # @repository:  https://github.com/TZERO78/Server-Baukasten
 # @license:     MIT
-# @version:     1.1
+# @version:     1.1.2
 #
 ################################################################################
 
@@ -26,23 +26,41 @@ if ! command -v log_info >/dev/null 2>&1; then
   log_error() { echo -e "❌ $*" >&2; }
 fi
 if ! command -v log_debug >/dev/null 2>&1; then
-  log_debug() { echo -e "🐞  $*"; }
+  log_debug() { echo -e "🐞  $*" >&2; }
 fi
 
-# Secrets aus *_FILE laden + Secret-Erkennung für Log-Maskierung --------------
+# ==============================================================================
+# SECRETS-LADER ( *_FILE )
+# ==============================================================================
+##
+# Lädt Secret aus <VAR>_FILE, falls gesetzt. Sicher für set -u.
+# Nutzt eval nur nach strikter Namensprüfung (A-Z0-9_). Keine Ausgabe der Werte.
+#
+# Example: resolve_secret SMTP_PASSWORD  -> liest SMTP_PASSWORD_FILE
+##
 resolve_secret() {
-  local var="$1" file_var="${1}_FILE" path="${!file_var:-}"
+  local var="$1"
+  local file_var="${1}_FILE"
+  local path=""
+
+  # Nur saubere VAR-Namen erlauben
+  [[ "$file_var" =~ ^[A-Z0-9_]+$ ]] || return 0
+  # Indirekte Expansion robust mit eval (kein :- bei ${!...} erlaubt)
+  eval "path=\${$file_var-}"
   [ -z "$path" ] && return 0
+
   umask 077
   if [ -r "$path" ]; then
-    local s; IFS= read -r s <"$path" || { log_error "Kann Secret nicht lesen: $path"; return 1; }
+    local s
+    IFS= read -r s <"$path" || { log_error "Kann Secret nicht lesen: $path"; return 1; }
     printf -v "$var" '%s' "$s"
     export "$var"
   else
     log_error "Secret-Datei nicht lesbar: $path"; return 1
   fi
 }
-# Heuristik: Variablennamen, die wie Secrets klingen
+
+# Heuristik: Variablennamen, die wie Secrets klingen (für Log-Maskierung)
 is_secret_var() { [[ "$1" =~ (PASSWORD|AUTH_KEY|SECRET|TOKEN)$ ]]; }
 
 # ==============================================================================
@@ -105,27 +123,18 @@ source_config_safely() {
     exit 1
   fi
 
-  # Verdächtige Zeichen prüfen (nur Zuweisungen, Kommentare/Leerzeilen ignorieren)
+  # Verdächtige Zeichen prüfen (nur Zuweisungen; Kommentare/Leerzeilen ignorieren)
   if awk '
     BEGIN{bad=0}
-    /^[[:space:]]*#/ || /^[[:space:]]*$/ {next}              # Kommentare/leer
+    /^[[:space:]]*#/ || /^[[:space:]]*$/ {next}
     /^[A-Z0-9_]+[[:space:]]*=/ {
       line=$0
-      # RHS (Wert) extrahieren
       sub(/^[A-Z0-9_]+[[:space:]]*=[[:space:]]*/, "", $0)
-      # Verbotene Muster in Werten:
-      #  - Backticks: `...`
-      #  - Command-Substitution: $(...)
-      #  - Process-Substitution: <(...), >(...)
-      #  - Unquotete Shell-Operatoren: ; | & < >
-      if ($0 ~ /`|\$\(|<\(|>\(|[;&|<>]/) { 
-        print NR ":" line; bad=1 
-      }
+      if ($0 ~ /`|\$\(|<\(|>\(|[;&|<>]/) { print NR ":" line; bad=1 }
       next
     }
     END{exit bad}
-  ' "$file"
-  then
+  ' "$file"; then
     log_error "Verdächtige Zeichen in Config gefunden (potentielle Command Injection)"
     exit 1
   fi
@@ -225,7 +234,7 @@ validate_config() {
     log_info "     Bereinigte Blocklist: $BLOCKED_COUNTRIES"
   fi
 
-  # Optionale Variablen mit Defaults
+  # Optionale Variablen mit Defaults setzen
   SSH_PUBLIC_KEY="${SSH_PUBLIC_KEY:-}"
   TAILSCALE_AUTH_KEY="${TAILSCALE_AUTH_KEY:-}"
   PORTAINER_IP="${PORTAINER_IP:-}"
@@ -284,3 +293,4 @@ load_config_from_file() {
   log_ok "🎉 Konfiguration erfolgreich geladen und validiert!"
 }
 
+# Ende ------------------------------------------------------------------------
