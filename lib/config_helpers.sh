@@ -105,10 +105,28 @@ source_config_safely() {
     exit 1
   fi
 
-  # Verdächtige Zeichen prüfen (Command-Injection-Schutz)
-  if grep -nE '[$`]|[(){};|&<>]' "$file" | grep -q .; then
+  # Verdächtige Zeichen prüfen (nur Zuweisungen, Kommentare/Leerzeilen ignorieren)
+  if awk '
+    BEGIN{bad=0}
+    /^[[:space:]]*#/ || /^[[:space:]]*$/ {next}              # Kommentare/leer
+    /^[A-Z0-9_]+[[:space:]]*=/ {
+      line=$0
+      # RHS (Wert) extrahieren
+      sub(/^[A-Z0-9_]+[[:space:]]*=[[:space:]]*/, "", $0)
+      # Verbotene Muster in Werten:
+      #  - Backticks: `...`
+      #  - Command-Substitution: $(...)
+      #  - Process-Substitution: <(...), >(...)
+      #  - Unquotete Shell-Operatoren: ; | & < >
+      if ($0 ~ /`|\$\(|<\(|>\(|[;&|<>]/) { 
+        print NR ":" line; bad=1 
+      }
+      next
+    }
+    END{exit bad}
+  ' "$file"
+  then
     log_error "Verdächtige Zeichen in Config gefunden (potentielle Command Injection)"
-    grep -nE '[$`]|[(){};|&<>]' "$file" | head -3
     exit 1
   fi
 
