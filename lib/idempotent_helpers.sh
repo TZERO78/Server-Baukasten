@@ -1,278 +1,257 @@
 #!/bin/bash
 ################################################################################
-# IDEMPOTENT HELPERS (Server-Baukasten)
-# Kleine Ensure-/Guard-Funktionen für wiederholbare, nebenwirkungsarme Aktionen.
-# MIT © Markus F. (TZERO78) & KI-Assistenten
+# IDEMPOTENT HELPERS
+#
+# @description: Release-agnostische Helfer für Paket-, Service- und Datei-Tasks,
+#               mit sanften Fallbacks und ohne Hardcoding von Codenames.
+# @author:      Server-Baukasten (TZERO78) & KI-Assistenten
+# @license:     MIT
+# @version:     1.0.0
 ################################################################################
+
 set -Eeuo pipefail
 
-# ── Log-Fallbacks (werden vom globalen log_helper überschrieben) ──────────────
+# ──────────────────────────────────────────────────────────────────────────────
+# Logging-Fallbacks (falls kein log_helper geladen ist)
+# ──────────────────────────────────────────────────────────────────────────────
 if ! command -v log_info >/dev/null 2>&1; then
-  log_info()  { echo -e "\033[0;36mℹ️  $*\033[0m"; }
-  log_ok()    { echo -e "\033[0;32m✅ $*\033[0m"; }
-  log_warn()  { echo -e "\033[1;33m⚠️  $*\033[0m"; }
-  log_error() { echo -e "\033[0;31m❌ $*\033[0m" >&2; }
+  log_info()  { printf '%b\n' "ℹ️  $*"; }
+  log_ok()    { printf '%b\n' "✅ $*"; }
+  log_warn()  { printf '%b\n' "⚠️  $*"; }
+  log_error() { printf '%b\n' "❌ $*" >&2; }
 fi
 if ! command -v log_debug >/dev/null 2>&1; then
-  log_debug() { [ "${DEBUG:-false}" = "true" ] && echo -e "\033[0;90m🐞  $*\033[0m" >&2 || true; }
+  log_debug() { [ "${DEBUG:-false}" = "true" ] && printf '%b\n' "🐞  $*" >&2 || true; }
 fi
 
-# ── Globales Verhalten ────────────────────────────────────────────────────────
-: "${DEBIAN_FRONTEND:=noninteractive}"
-: "${APT_LISTCHANGES_FRONTEND:=none}"
-: "${DRYRUN:=no}"
+# ──────────────────────────────────────────────────────────────────────────────
+# Kleine Utils
+# ──────────────────────────────────────────────────────────────────────────────
+_has() { command -v "$1" >/dev/null 2>&1; }
 
-_run() {
-  if [ "$DRYRUN" = "yes" ]; then
-    log_info "[DRY] $*"
-    return 0
+# Minimaler Spinner-Fallback (nur wenn run_with_spinner fehlt)
+if ! command -v run_with_spinner >/dev/null 2>&1; then
+  run_with_spinner() {
+    # $1: Titel, $2: Kommando
+    local title="$1" cmd="$2"
+    log_info "$title"
+    if eval "$cmd"; then
+      log_ok "$title: Erfolg!"
+      return 0
+    else
+      log_error "$title: Fehlgeschlagen!"
+      return 1
+    fi
+  }
+fi
+
+# ──────────────────────────────────────────────────────────────────────────────
+# OS/Codename ermitteln (release-agnostisch)
+# ──────────────────────────────────────────────────────────────────────────────
+os_release() {
+  local id="unknown" codename="unknown"
+  if [ -r /etc/os-release ]; then
+    # shellcheck disable=SC1091
+    . /etc/os-release
+    id="${ID:-$id}"
+    codename="${VERSION_CODENAME:-$codename}"
   fi
-  "$@"
+  printf '%s %s\n' "$id" "$codename"
 }
 
-# ── APT/DPKG ──────────────────────────────────────────────────────────────────
-ensure_dpkg_unlocked() {
-  log_debug "dpkg/apt: entferne Locks & repariere evtl. abgebrochene Vorgänge"
-  _run rm -f /var/lib/dpkg/lock-frontend /var/lib/dpkg/lock 2>/dev/null || true
-  _run dpkg --configure -a >/dev/null 2>&1 || true
-  _run apt-get -y -f install >/dev/null 2>&1 || true
-}
-
-# robuster als „update once“: mit Heuristik & Retries
-apt_update_retry() {
-  local tries=0 max=3
-  local out="/tmp/.sbk_apt_update.log"
-  while (( tries < max )); do
-    ((tries++))
-    log_debug "apt-get update Versuch $tries/$max"
-    if _run apt-get update -y >"$out" 2>&1; then
-      _run install -d -m 755 /run >/dev/null 2>&1 || true
-      _run touch /run/.sbk_apt_updated
-      log_debug "apt-get update: erfolgreich"
+# ──────────────────────────────────────────────────────────────────────────────
+# APT/DPKG Locks warten (nur wenn apt_repair_helpers nicht geladen)
+# ──────────────────────────────────────────────────────────────────────────────
+apt_wait_for_locks_local() {
+  local tries=30
+  while (( tries-- > 0 )); do
+    if command -v fuser >/dev/null 2>&1 && {
+         fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1 ||
+         fuser /var/lib/apt/lists/lock >/dev/null 2>&1 ||
+         fuser /var/cache/apt/archives/lock >/dev/null 2>&1 ; } ; then
+      log_debug "    - Warte auf APT-Locks… ($((30-tries))/30)"
+      sleep 2
+    else
       return 0
     fi
-    if grep -q "Could not get lock" "$out"; then
-      log_warn "apt ist gesperrt – warte 10s"
-      sleep 10
-    elif grep -q "NO_PUBKEY" "$out"; then
-      log_warn "fehlende GPG-Keys – versuche apt-key update"
-      _run apt-key update >/dev/null 2>&1 || true
-    fi
-    sleep 5
   done
-  log_error "apt-get update nach $max Versuchen fehlgeschlagen"; return 1
+  log_warn "APT-Locks hängen ungewöhnlich lang – versuche 'dpkg --configure -a'."
+  dpkg --configure -a || true
 }
 
-pkg_installed() { dpkg -s "$1" >/dev/null 2>&1; }
+apt_wait_for_locks_wrapper() {
+  if command -v apt_wait_for_locks >/dev/null 2>&1; then
+    apt_wait_for_locks
+  else
+    apt_wait_for_locks_local
+  fi
+}
 
-ensure_packages_present() {
-  local need=() p
+# ──────────────────────────────────────────────────────────────────────────────
+# APT: Paketverfügbarkeit / Alternativen / Installation
+# ──────────────────────────────────────────────────────────────────────────────
+
+# Prüfen, ob ein Paket im aktuellen Release eine Candidate-Version hat
+apt_pkg_available() {
+  apt-cache policy "$1" 2>/dev/null | awk '/Candidate:/ {print $2}' | grep -vq '(none)'
+}
+
+# Bekannte Umbenennungen/Alternativen ohne Release-Hardcodes
+# – nur wenn Hauptname nicht verfügbar ist
+pkg_alternatives() {
+  case "$1" in
+    # dns tools
+    bind9-dnsutils) echo "dnsutils" ;;
+    # https transport (alt)
+    apt-transport-https) echo "apt" ;;
+    # apparmor-utils ist teils im metapaket aufgegangen
+    apparmor-utils) echo "apparmor" ;;
+    # geoip-bin teils ersetzt/entfallen → lassen wir leer (wird ggf. geskippt)
+    # tmux Versionskonflikte behebt apt selbst, keine Alt nötig
+    *) : ;;
+  esac
+}
+
+# Ermittelt die erste installierbare Wahl aus Hauptpaket + Alternativen
+pkg_resolve_one() {
+  local name="$1"; shift || true
+  if apt_pkg_available "$name"; then
+    echo "$name"; return 0
+  fi
+  local alt
+  for alt in "$@"; do
+    if apt_pkg_available "$alt"; then
+      echo "$alt"; return 0
+    fi
+  done
+  return 1
+}
+
+# Führt ein apt-get update (leise) aus, wenn sinnvoll.
+apt_update_quick() {
+  apt_wait_for_locks_wrapper
+  apt-get -o DPkg::Lock::Timeout=60 update -qq
+}
+
+# Idempotente Installation: wählt dynamisch Alternativen & skipt nicht verfügbare
+install_packages_safe() {
+  local id codename; read -r id codename < <(os_release)
+
+  # Falls Default-Release gesetzt wurde, respektieren
+  local apt_def_rel_opt=()
+  if [ -f /etc/apt/apt.conf.d/90defaultrelease ]; then
+    apt_def_rel_opt=(-o "APT::Default-Release=$codename")
+  fi
+
+  local wants=("$@") n alts choice
+  local resolved=() skipped=()
+
+  # Vorher einmal schnell update (schadet nicht)
+  apt_update_quick || true
+
+  for n in "${wants[@]}"; do
+    # Bereits installiert?
+    if dpkg -s "$n" >/dev/null 2>&1; then
+      log_debug "✓ $n bereits installiert"
+      continue
+    fi
+    # Alternativen ermitteln
+    read -r -a alts <<<"$(pkg_alternatives "$n")"
+    if choice="$(pkg_resolve_one "$n" "${alts[@]}")"; then
+      # Doppelungen vermeiden
+      if [[ ! " ${resolved[*]} " =~ " ${choice} " ]]; then
+        resolved+=("$choice")
+      fi
+    else
+      log_warn "Paket im Release nicht verfügbar: $n"
+      skipped+=("$n")
+    fi
+  done
+
+  if [ ${#resolved[@]} -eq 0 ]; then
+    log_ok "Alle gewünschten Pakete sind bereits installiert oder entfallen: ${skipped[*]:-—}"
+    return 0
+  fi
+
+  export DEBIAN_FRONTEND=noninteractive
+  run_with_spinner "Installiere ${#resolved[@]} Pakete…" \
+    apt-get "${apt_def_rel_opt[@]}" -o Dpkg::Options::=--force-confdef \
+                                   -o Dpkg::Options::=--force-confold \
+                                   --no-install-recommends -y install "${resolved[@]}"
+}
+
+# Idempotente Entfernung (purge) einer Paketliste.
+purge_packages_safe() {
+  local to_purge=() p
   for p in "$@"; do
-    if ! dpkg -s "$p" >/dev/null 2>&1; then
-      need+=("$p")
-    fi
+    dpkg -s "$p" >/dev/null 2>&1 && to_purge+=("$p")
   done
-  if ((${#need[@]})); then
-    log_info "install: ${need[*]}"
-    apt_update_retry
-    _run apt-get install -y "${need[@]}" >/dev/null 2>&1 || true
-  else
-    log_debug "alle benötigten Pakete bereits installiert"
+  [ ${#to_purge[@]} -eq 0 ] && { log_info "Keine Pakete zu purgen."; return 0; }
+  run_with_spinner "Entferne Pakete (purge)..." \
+    "apt-get -y --purge autoremove ${to_purge[*]} && apt-get -y autoclean"
+}
+
+# ──────────────────────────────────────────────────────────────────────────────
+# systemd: Idempotente Service-Operationen
+# ──────────────────────────────────────────────────────────────────────────────
+systemctl_enable_now_safe() {
+  local unit="$1"
+  systemctl is-enabled "$unit" >/dev/null 2>&1 || systemctl enable "$unit"
+  systemctl is-active  "$unit" >/dev/null 2>&1 || systemctl start  "$unit"
+}
+
+systemctl_disable_mask_safe() {
+  local unit="$1"
+  systemctl is-active "$unit"  >/dev/null 2>&1 && systemctl stop  "$unit"
+  systemctl is-enabled "$unit" >/dev/null 2>&1 && systemctl disable "$unit"
+  systemctl is-enabled "$unit" >/dev/null 2>&1 || systemctl mask "$unit" || true
+}
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Dateien/Symlinks: Idempotente Helfer
+# ──────────────────────────────────────────────────────────────────────────────
+write_file_if_changed() {
+  # $1: Zieldatei, $2: Inhalt (String)
+  local dest="$1" content="$2"
+  local tmp; tmp="$(mktemp)"
+  printf '%s' "$content" > "$tmp"
+
+  # Optional: Backup registrieren, wenn Funktion existiert
+  if command -v backup_and_register >/dev/null 2>&1; then
+    backup_and_register "$dest"
   fi
-}
 
-ensure_packages_absent() {
-  local did=0 p
-  for p in "$@"; do
-    if pkg_installed "$p"; then
-      log_info "purge: $p"
-      _run apt-get -y purge "$p" >/dev/null 2>&1 || true
-      did=1
-    fi
-  done
-  if [ $did -eq 1 ]; then
-    _run apt-get -y autoremove --purge >/dev/null 2>&1 || true
-    _run apt-get autoclean >/dev/null 2>&1 || true
+  if [ -f "$dest" ] && cmp -s "$tmp" "$dest"; then
+    log_debug "Unverändert: $dest"
+    rm -f "$tmp"
+    return 0
   fi
-}
-
-# ── systemd Units ─────────────────────────────────────────────────────────────
-unit_active()  { systemctl is-active  "$1" >/dev/null 2>&1; }
-unit_enabled() { systemctl is-enabled "$1" >/dev/null 2>&1; }
-
-ensure_unit_stopped_disabled_masked() {
-  local u
-  for u in "$@"; do
-    unit_active  "$u" && { log_info "stop: $u";    _run systemctl stop "$u" >/dev/null 2>&1 || true; }
-    unit_enabled "$u" && { log_info "disable: $u"; _run systemctl disable "$u" >/dev/null 2>&1 || true; }
-    _run systemctl mask "$u" >/dev/null 2>&1 || true
-    log_debug "unit masked: $u"
-  done
-  _run systemctl reset-failed >/dev/null 2>&1 || true
-}
-
-ensure_unit_started_enabled() {
-  local u
-  for u in "$@"; do
-    _run systemctl unmask "$u"  >/dev/null 2>&1 || true
-    unit_enabled "$u" || { log_info "enable: $u"; _run systemctl enable "$u" >/dev/null 2>&1 || true; }
-    unit_active  "$u" || { log_info "start:  $u"; _run systemctl start  "$u" >/devnull 2>&1 || true; }
-  done
-}
-
-# ── Dateien/Verzeichnisse ────────────────────────────────────────────────────
-ensure_dir() {
-  local d="$1" mode="${2:-750}" owner="${3:-root:root}"
-  if [ ! -d "$d" ]; then
-    log_info "mkdir: $d"
-    _run install -d -m "$mode" -o "${owner%%:*}" -g "${owner##*:}" "$d"
-  else
-    log_debug "dir existiert: $d"
-  fi
-}
-
-ensure_file_absent() {
-  local f; for f in "$@"; do
-    [ -e "$f" ] || continue
-    log_info "rm: $f"; _run rm -f "$f" || true
-  done
-}
-
-ensure_symlink() {
-  local target="$1" link="$2"
-  if [ ! -L "$link" ] || [ "$(readlink -f "$link")" != "$(readlink -f "$target")" ]; then
-    log_info "symlink: $link -> $target"
-    _run ln -sfn "$target" "$link"
-  else
-    log_debug "symlink korrekt: $link"
-  fi
-}
-
-ensure_permissions() {
-  local path="$1" mode="$2" owner="${3:-}"
-  [ -e "$path" ] || return 0
-  local cur_mode cur_owner
-  cur_mode=$(stat -c %a "$path") || true
-  if [ "$cur_mode" != "$mode" ]; then
-    log_info "chmod $mode: $path"; _run chmod "$mode" "$path"
-  fi
-  if [ -n "$owner" ]; then
-    cur_owner=$(stat -c %U:%G "$path") || true
-    if [ "$cur_owner" != "$owner" ]; then
-      log_info "chown $owner: $path"; _run chown "$owner" "$path"
-    fi
-  fi
+  install -m 0644 -o root -g root "$tmp" "$dest"
+  rm -f "$tmp"
+  log_ok "Aktualisiert: $dest"
 }
 
 ensure_line_in_file() {
-  local file="$1" line="$2" match_re="${3:-}"
+  # $1: Datei, $2: Regex (ohne Delimiter), $3: Zeile (ganzer Text)
+  local file="$1" pattern="$2" line="$3"
   touch "$file"
-  if [ -n "$match_re" ]; then
-    if ! grep -Eq "$match_re" "$file"; then
-      log_info "append: $file → $line"
-      _run sh -c "printf '%s\n' '$line' >> '$file'"
-    else
-      log_debug "Zeile bereits vorhanden (Regex match): $file"
-    fi
-  else
-    if ! grep -Fxq "$line" "$file"; then
-      log_info "append: $file → $line"
-      _run sh -c "printf '%s\n' '$line' >> '$file'"
-    else
-      log_debug "Zeile bereits vorhanden (exakt): $file"
-    fi
+  grep -Eq "$pattern" "$file" && { log_debug "Zeile bereits vorhanden in $file"; return 0; }
+  if command -v backup_and_register >/dev/null 2>&1; then
+    backup_and_register "$file"
   fi
+  printf '%s\n' "$line" >> "$file"
+  log_ok "Zeile ergänzt in $file"
 }
 
-# ── Netz/Kernel/Sysctl ───────────────────────────────────────────────────────
-ensure_sysctl_kv() {
-  local key="$1" val="$2" dropin="${3:-/etc/sysctl.d/99-baukasten-hardening.conf}"
-  ensure_dir "$(dirname "$dropin")" 755
-  local need_reload=false
-
-  if [ "$(sysctl -n "$key" 2>/dev/null || echo)" != "$val" ]; then
-    log_info "sysctl -w $key=$val"
-    _run sysctl -w "$key=$val" >/dev/null 2>&1 || true
-  else
-    log_debug "sysctl Laufzeitwert OK: $key=$val"
+ensure_symlink() {
+  # $1: Linkpfad, $2: Ziel
+  local link="$1" target="$2"
+  if [ -L "$link" ] && [ "$(readlink -f "$link")" = "$(readlink -f "$target")" ]; then
+    log_debug "Symlink ok: $link -> $target"
+    return 0
   fi
-
-  if ! grep -Eq "^\s*${key}\s*=\s*${val}\s*$" "$dropin" 2>/dev/null; then
-    log_info "persist: $dropin → $key=$val"
-    _run sh -c "printf '%s\n' '${key}=${val}' >> '$dropin'"
-    need_reload=true
-  else
-    log_debug "sysctl persistenter Wert OK: $dropin ($key=$val)"
-  fi
-
-  $need_reload && { log_info "sysctl --system"; _run sysctl --system >/dev/null 2>&1 || true; }
+  rm -f "$link"
+  ln -s "$target" "$link"
+  log_ok "Symlink gesetzt: $link -> $target"
 }
-
-ensure_module_loaded() {
-  local mod="$1"
-  lsmod | awk '{print $1}' | grep -Fxq "$mod" && { log_debug "Kernelmodul aktiv: $mod"; return 0; }
-  log_info "modprobe $mod"; _run modprobe "$mod" || true
-}
-
-# ── Firewall-Utilities ───────────────────────────────────────────────────────
-iptables_minimal_flush() {
-  local t
-  for t in iptables ip6tables; do
-    command -v "$t" >/dev/null 2>&1 || continue
-    _run "$t" -F >/dev/null 2>&1 || true
-    _run "$t" -t nat -F >/dev/null 2>&1 || true
-    _run "$t" -t mangle -F >/dev/null 2>&1 || true
-  done
-  log_debug "iptables: Minimal-Flush durchgeführt"
-}
-
-ensure_ufw_disabled() {
-  command -v ufw >/dev/null 2>&1 || { log_debug "UFW nicht installiert"; return 0; }
-  local status; status=$(ufw status 2>/dev/null | awk '/Status:/{print $2}')
-  if [ "$status" = "active" ]; then
-    log_warn "UFW deaktivieren…"
-    _run ufw --force disable >/dev/null 2>&1 || true
-    iptables_minimal_flush
-  else
-    log_debug "UFW bereits inaktiv"
-  fi
-}
-
-# ── Benutzer/Gruppen ─────────────────────────────────────────────────────────
-ensure_user_exists() {
-  local name="$1" uid="${2:-}" gid="${3:-}" home="${4:-/home/$1}" shell="${5:-/bin/bash}"
-  if ! id -u "$name" >/dev/null 2>&1; then
-    log_info "useradd: $name"
-    local args=("-m" "-d" "$home" "-s" "$shell")
-    [ -n "$uid" ] && args+=("-u" "$uid")
-    [ -n "$gid" ] && { getent group "$gid" >/dev/null 2>&1 || _run groupadd "$gid"; args+=("-g" "$gid"); }
-    _run useradd "${args[@]}" "$name"
-  else
-    log_debug "User existiert bereits: $name"
-  fi
-}
-
-ensure_user_absent() {
-  local name="$1"
-  id -u "$name" >/dev/null 2>&1 || { log_debug "User nicht vorhanden: $name"; return 0; }
-  log_info "userdel: $name"
-  _run userdel -r "$name" >/dev/null 2>&1 || true
-}
-
-ensure_sudoers_dropin() {
-  local name="$1" drop="/etc/sudoers.d/$1" content="$2"
-  ensure_dir /etc/sudoers.d 755 root:root
-  if [ ! -f "$drop" ] || ! cmp -s <(printf '%s\n' "$content") "$drop"; then
-    log_info "sudoers.d: $drop"
-    _run sh -c "printf '%s\n' '$content' > '$drop'"
-    _run chmod 440 "$drop"
-    _run visudo -cf "$drop" >/dev/null 2>&1 || log_warn "sudoers Drop-In '$drop' konnte nicht validiert werden"
-  else
-    log_debug "sudoers Drop-In OK: $drop"
-  fi
-}
-
-pause_if_debug() {
-  [ "${DEBUG:-false}" = "true" ] || return 0
-  read -r -p "Weiter mit Enter… " _ || true
-}
+# Ende ─────────────────────────────────────────────────────────────────────────
