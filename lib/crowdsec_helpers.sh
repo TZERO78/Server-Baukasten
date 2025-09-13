@@ -226,7 +226,7 @@ EOF
 ##
 install_crowdsec_stack() {
     log_info "⚙️  Installiere CrowdSec-Stack..."
-
+	set -x # Debugging an
     # OS erkennen und CrowdSec installieren
     install_crowdsec_by_detected_os || {
         log_error "CrowdSec-Installation fehlgeschlagen"
