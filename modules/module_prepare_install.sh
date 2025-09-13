@@ -30,6 +30,14 @@ if ! command -v explain >/dev/null 2>&1; then
   explain() { [ $# -gt 0 ] && log_info "$*" || true; return 0; }
 fi
 
+## Verzeichnisse sicherstellen, die apt erwartet
+ensure_apt_paths() {
+  # Diese Verzeichnisse werden von apt & Repo-Installern erwartet
+  mkdir -p /etc/apt/sources.list.d /etc/apt/keyrings /etc/apt/preferences.d
+  chmod 755 /etc/apt /etc/apt/sources.list.d /etc/apt/preferences.d
+  # keyrings darf 755 sein, einzelne *.gpg darin 644
+  chmod 755 /etc/apt/keyrings 2>/dev/null || true
+}
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Modul-Einstiegspunkt
@@ -119,6 +127,10 @@ module_prepare_install() {
   else
     log_ok "Alle Basis-Tools bereits vorhanden."
   fi
+
+  # APT-Pfade sicherstellen (für Repo-Installer etc.)
+  ensure_apt_paths
+  log_debug "APT-Pfade sichergestellt."
 
   # --- Locks final räumen ----------------------------------------------------
   if type -t apt_wait_for_locks >/dev/null 2>&1; then apt_wait_for_locks; fi
