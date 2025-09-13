@@ -86,8 +86,101 @@ setup_crowdsec_external_repository() {
 }
 
 ##
+# Konfiguriert CrowdSec Bouncer YAML-sicher mit yq
+##
+configure_bouncer_with_yq() {
+    log_info "  -> Konfiguriere NFTables-Modus mit yq (YAML-sicher)..."
+    
+    local dir="/etc/crowdsec/bouncers"
+    local base_yml="$dir/crowdsec-firewall-bouncer.yaml"
+    local local_yml="$dir/crowdsec-firewall-bouncer.yaml.local"
+    local keyfile="$dir/.api_key"
+    
+    # Base-Config kopieren (idempotent)
+    if [ ! -f "$local_yml" ] || [ "$base_yml" -nt "$local_yml" ]; then
+        cp "$base_yml" "$local_yml"
+        log_debug "Base-Config kopiert"
+    fi
+    
+    # API-Key generieren falls nötig
+    if [ ! -s "$keyfile" ]; then
+        install -o root -g root -m600 /dev/null "$keyfile"
+        if ! cscli bouncers add firewall-bouncer -o raw >"$keyfile"; then
+            log_error "API-Key-Generierung fehlgeschlagen!"
+            return 1
+        fi
+        log_debug "API-Key generiert"
+    fi
+    
+    local api_key
+    api_key=$(cat "$keyfile" | tr -d '\n\r')
+    
+    # YAML-Konfiguration mit yq (Template-Variablen ersetzen)
+    yq eval -i '.mode = "nftables"' "$local_yml"
+    yq eval -i '.log_level = "info"' "$local_yml"
+    yq eval -i '.update_frequency = "30s"' "$local_yml"
+    yq eval -i '.disable_ipv6 = false' "$local_yml"
+    yq eval -i '.api_key = "'"$api_key"'"' "$local_yml"
+    
+    # NFTables IPv4-Konfiguration
+    yq eval -i '.nftables.ipv4.enabled = true' "$local_yml"
+    yq eval -i '.nftables.ipv4.set-only = true' "$local_yml"
+    yq eval -i '.nftables.ipv4.table = "crowdsec"' "$local_yml"
+    yq eval -i '.nftables.ipv4.chain = "crowdsec-chain"' "$local_yml"
+    yq eval -i '.blacklists_ipv4 = "crowdsec-blacklists"' "$local_yml"
+    
+    # NFTables IPv6-Konfiguration
+    yq eval -i '.nftables.ipv6.enabled = true' "$local_yml"
+    yq eval -i '.nftables.ipv6.set-only = true' "$local_yml"
+    yq eval -i '.nftables.ipv6.table = "crowdsec6"' "$local_yml"
+    yq eval -i '.nftables.ipv6.chain = "crowdsec6-chain"' "$local_yml"
+    yq eval -i '.blacklists_ipv6 = "crowdsec6-blacklists"' "$local_yml"
+    
+    log_info "     🔧 NFTables set-only Mode konfiguriert"
+    log_info "     🎯 IPv4: crowdsec/crowdsec-blacklists"
+    log_info "     🎯 IPv6: crowdsec6/crowdsec6-blacklists"
+    
+    # Konfiguration validieren
+    log_info "  -> Teste Konfiguration..."
+    if /usr/bin/crowdsec-firewall-bouncer -c "$local_yml" -t >/dev/null 2>&1; then
+        log_ok "Bouncer-Konfiguration ist gültig"
+        return 0
+    else
+        log_error "Konfiguration fehlerhaft!"
+        log_info "Config-Datei: $local_yml"
+        return 1
+    fi
+}
+
+##
+# Erstelle NFTables-Sets vor dem Service-Start
+##
+ensure_nftables_sets() {
+    log_info "  -> Stelle NFTables-Sets sicher..."
+    
+    # IPv4-Sets
+    if ! nft list set ip crowdsec crowdsec-blacklists >/dev/null 2>&1; then
+        nft add table ip crowdsec 2>/dev/null || true
+        nft add set ip crowdsec crowdsec-blacklists '{ type ipv4_addr; flags interval; }' 2>/dev/null || true
+        log_debug "IPv4-Set crowdsec-blacklists erstellt"
+    else
+        log_debug "IPv4-Set crowdsec-blacklists bereits vorhanden"
+    fi
+    
+    # IPv6-Sets
+    if ! nft list set ip6 crowdsec6 crowdsec6-blacklists >/dev/null 2>&1; then
+        nft add table ip6 crowdsec6 2>/dev/null || true
+        nft add set ip6 crowdsec6 crowdsec6-blacklists '{ type ipv6_addr; flags interval; }' 2>/dev/null || true
+        log_debug "IPv6-Set crowdsec6-blacklists erstellt"
+    else
+        log_debug "IPv6-Set crowdsec6-blacklists bereits vorhanden"
+    fi
+    
+    log_ok "NFTables-Sets verfügbar"
+}
+
+##
 # Erstellt einen dedizierten systemd-Service für set-only Mode
-# Löst alle bekannten Probleme: Ordering Cycles, Type=notify, falsche Dependencies, Metrics-Flooding
 ##
 create_setonly_bouncer_service() {
     log_info "  -> Erstelle dedizierten systemd-Service für set-only Mode..."
@@ -97,21 +190,6 @@ create_setonly_bouncer_service() {
     
     log_debug "Erstelle Service-Datei: $service_file"
     log_debug "Nutzt Config: $config_file"
-    
-    # VPS-spezifische Checks (UFW ist deinstalliert, nur NFTables)
-    log_debug "VPS-Umgebung: Nur NFTables, kein UFW - optimal! ✅"
-    
-    # Prüfe verfügbare Interfaces (VPS haben oft nicht eth0)
-    local primary_interface
-    primary_interface=$(ip route | grep default | head -n1 | awk '{print $5}')
-    log_debug "Primäres Interface: $primary_interface"
-    
-    # Prüfe ob NFTables-Struktur existiert (aus generate_crowdsec_rules)
-    if ! nft list table ip crowdsec >/dev/null 2>&1; then
-        log_warn "CrowdSec NFTables-Struktur nicht gefunden - wird bei nächstem NFTables-Reload geladen"
-    else
-        log_debug "CrowdSec NFTables-Struktur bereits vorhanden"
-    fi
     
     cat > "$service_file" <<EOF
 [Unit]
@@ -129,10 +207,10 @@ Group=root
 # Warte bis CrowdSec API verfügbar ist
 ExecStartPre=/bin/bash -c 'until cscli metrics >/dev/null 2>&1; do sleep 2; done'
 
-# KORRIGIERT: Konfiguration testen
+# Konfiguration testen
 ExecStartPre=/usr/bin/crowdsec-firewall-bouncer -c $config_file -t
 
-# Haupt-Service starten  
+# Haupt-Service starten
 ExecStart=/usr/bin/crowdsec-firewall-bouncer -c $config_file
 
 # Robuster Restart bei Problemen
@@ -151,7 +229,7 @@ ProtectHome=true
 ProtectSystem=strict
 ReadWritePaths=/var/log /var/run
 
-# Umgebung - WICHTIG: Metrics-Problem in set-only Mode beheben
+# Umgebung - Metrics-Problem in set-only Mode beheben
 Environment=BOUNCER_MODE=set-only
 Environment=BOUNCER_DISABLE_METRICS=true
 Environment=BOUNCER_LOG_LEVEL=info
@@ -163,33 +241,6 @@ SyslogIdentifier=crowdsec-bouncer-setonly
 WantedBy=multi-user.target
 EOF
 
-    log_debug "Service-Datei erstellt mit korrekten Dependencies und Metrics-Fix"
-    
-    # Konfiguriere Bouncer für Server-Baukasten Integration + VPS-Optimierungen
-    log_info "  -> Konfiguriere Bouncer für Server-Baukasten Sets..."
-    if command -v yq &>/dev/null; then
-        log_debug "Verwende yq v4+ für Set-Namen-Konfiguration"
-        yq eval -i '.blacklists_ipv4 = "crowdsec-blacklists"' "$config_file"
-        yq eval -i '.blacklists_ipv6 = "crowdsec6-blacklists"' "$config_file"
-        yq eval -i '.nftables.ipv4.table = "crowdsec"' "$config_file"
-        yq eval -i '.nftables.ipv6.table = "crowdsec6"' "$config_file"
-        
-        # IPv4 und IPv6 standardmäßig aktivieren
-        yq eval -i '.nftables.ipv4.enabled = true' "$config_file"
-        yq eval -i '.nftables.ipv6.enabled = true' "$config_file"
-        yq eval -i '.disable_ipv6 = false' "$config_file"
-        
-        # VPS-Optimierung: Niedrigere Update-Frequenz für bessere Performance
-        yq eval -i '.update_frequency = "30s"' "$config_file"
-        log_debug "Update-Frequenz auf 30s gesetzt (VPS-optimiert)"
-        
-    else
-        log_debug "yq nicht verfügbar, verwende sed für Set-Namen"
-        sed -i 's/blacklists_ipv4:.*/blacklists_ipv4: crowdsec-blacklists/' "$config_file"
-        sed -i 's/blacklists_ipv6:.*/blacklists_ipv6: crowdsec6-blacklists/' "$config_file"
-        sed -i 's/disable_ipv6:.*/disable_ipv6: false/' "$config_file"
-    fi
-    
     # Deaktiviere den Original-Service sauber
     log_info "  -> Migriere vom Original-Bouncer-Service..."
     if systemctl is-enabled crowdsec-firewall-bouncer.service >/dev/null 2>&1; then
@@ -208,7 +259,6 @@ EOF
     log_ok "Dedizierter set-only Service erstellt und aktiviert"
     log_info "  Service-Datei: $service_file"
     log_info "  Nutzt Sets: crowdsec-blacklists (IPv4) & crowdsec6-blacklists (IPv6)"
-    log_info "  Zu starten mit: systemctl start crowdsec-bouncer-setonly"
 }
 
 #################################################################################
@@ -303,14 +353,16 @@ configure_bouncer() {
         return 1
     fi
     
-    log_ok "Voraussetzungen erfüllt: CrowdSec-Service, API und NFTables verfügbar"
+    if ! command -v yq >/dev/null 2>&1; then
+        log_error "yq nicht verfügbar für YAML-Konfiguration!"
+        return 1
+    fi
+    
+    log_ok "Voraussetzungen erfüllt: CrowdSec-Service, API, NFTables und yq verfügbar"
 
     # --- 2. Konfigurationsdateien vorbereiten ---
-    local pkg="crowdsec-firewall-bouncer"
     local dir="/etc/crowdsec/bouncers"
     local base_yml="$dir/crowdsec-firewall-bouncer.yaml"
-    local local_yml="$dir/crowdsec-firewall-bouncer.yaml.local"
-    local keyfile="$dir/.api_key"
     
     # BOUNCER IST BEREITS INSTALLIERT - nur Konfiguration prüfen
     if [ ! -f "$base_yml" ]; then
@@ -320,98 +372,17 @@ configure_bouncer() {
     fi
     log_debug "Base-Konfigurationsdatei verfügbar"
 
-    # --- 3. Konfiguriere für NFTables-Modus ---
-    log_info "  -> Konfiguriere NFTables-Modus..."
-    # Idempotenz: Nur kopieren wenn lokale Config nicht existiert oder veraltet ist
-    if [ ! -f "$local_yml" ] || [ "$base_yml" -nt "$local_yml" ]; then
-        cp "$base_yml" "$local_yml"
-        log_debug "Vollständige Konfiguration kopiert: $base_yml -> $local_yml"
-    else
-        log_debug "Lokale Konfiguration ist bereits aktuell"
-    fi
-    
-    # Ersetze Template-Variable ${BACKEND} durch nftables
-    if grep -q '${BACKEND}' "$local_yml" 2>/dev/null; then
-        sed -i 's/mode: ${BACKEND}/mode: nftables/' "$local_yml"
-        log_info "     🔧 Template-Modus → nftables"
-    else
-        sed -i 's/^mode:.*/mode: nftables/' "$local_yml"
-        log_info "     🔧 NFTables-Modus gesetzt"
-    fi
-    
-    # Optimiere Logging-Konfiguration
-    sed -i 's/debug: .*/debug: false/' "$local_yml"
-    sed -i 's/log_level: .*/log_level: info/' "$local_yml"
+    # --- 3. NFTables-Sets sicherstellen ---
+    ensure_nftables_sets
 
-    # --- 4. KRITISCH: Server-Baukasten NFTables-Integration (set-only) ---
-    log_info "  -> Konfiguriere für Server-Baukasten NFTables-Integration..."
-    
-    # Set-only Mode aktivieren (der fehlende Schlüssel!)
-    sed -i '/nftables:/,/^[^ ]/ s/set-only: false/set-only: true/g' "$local_yml"
-    
-    # Konfiguriere Set-Namen für vordefinierte NFTables-Struktur
-    sed -i 's/blacklists_ipv4: .*/blacklists_ipv4: crowdsec-blacklists/' "$local_yml"
-    sed -i 's/blacklists_ipv6: .*/blacklists_ipv6: crowdsec6-blacklists/' "$local_yml"
-    
-    # NFTables-Tabellen und Chains konfigurieren
-    if command -v yq &>/dev/null && yq --help 2>&1 | grep -q "mikefarah"; then
-        yq eval -i '.nftables.ipv4.table = "crowdsec"' "$local_yml"
-        yq eval -i '.nftables.ipv4.chain = "crowdsec-chain"' "$local_yml"
-        yq eval -i '.nftables.ipv6.table = "crowdsec6"' "$local_yml" 
-        yq eval -i '.nftables.ipv6.chain = "crowdsec6-chain"' "$local_yml"
-        
-        # IPv4 und IPv6 standardmäßig aktivieren
-        yq eval -i '.nftables.ipv4.enabled = true' "$local_yml"
-        yq eval -i '.nftables.ipv6.enabled = true' "$local_yml"
-        yq eval -i '.disable_ipv6 = false' "$local_yml"
-        
-        log_debug "NFTables-Tabellen mit yq konfiguriert"
-    fi
-    
-    log_info "     🔧 Set-only Modus aktiviert"
-    log_info "     🎯 NFTables-Sets: crowdsec-blacklists (IPv4), crowdsec6-blacklists (IPv6)"
+    # --- 4. YAML-Konfiguration mit yq ---
+    configure_bouncer_with_yq
 
-    # --- 5. API-Schlüssel (robuste Methode mit Idempotenz) ---
-    log_info "  -> Generiere und konfiguriere API-Schlüssel..."
-    
-    if [ ! -s "$keyfile" ]; then
-        install -o root -g root -m600 /dev/null "$keyfile"
-        if ! cscli bouncers add firewall-bouncer -o raw >"$keyfile"; then
-            log_error "API-Key-Generierung fehlgeschlagen!"
-            return 1
-        fi
-        log_debug "Neuer API-Key generiert"
-    else
-        log_debug "API-Key-File existiert bereits"
-    fi
-    
-    # ROBUSTE API-KEY-ERSETZUNG (temp-file Methode)
-    local api_key
-    api_key=$(cat "$keyfile" 2>/dev/null | tr -d '\n\r')
-    if [ -n "$api_key" ]; then
-        if grep -q '${API_KEY}' "$local_yml" 2>/dev/null; then
-            log_debug "Template-Variable \${API_KEY} gefunden, ersetze durch echten Key"
-            printf '%s\n' "$(cat "$local_yml")" | sed "s|\${API_KEY}|$api_key|g" > "$local_yml.tmp"
-            mv "$local_yml.tmp" "$local_yml"
-        else
-            # Idempotenz: Nur ersetzen wenn noch nicht gesetzt
-            if ! grep -q "^api_key: $api_key" "$local_yml"; then
-                log_debug "Keine Template-Variable, setze API-Key direkt"
-                printf '%s\n' "$(cat "$local_yml")" | sed "s|^api_key:.*|api_key: $api_key|" > "$local_yml.tmp"
-                mv "$local_yml.tmp" "$local_yml"
-            fi
-        fi
-        log_info "     🔑 API-Key konfiguriert"
-    else
-        log_error "API-Key ist leer!"
-        return 1
-    fi
-
-    # --- 6. Dedizierter systemd-Service für set-only Mode ---
+    # --- 5. Dedizierter systemd-Service für set-only Mode ---
     log_info "  -> Erstelle dedizierten systemd-Service für set-only Mode..."
     create_setonly_bouncer_service
 
-    # --- 7. Health-Check-System ---
+    # --- 6. Health-Check-System ---
     log_info "  -> Installiere Health-Check-System..."
     install -m755 /dev/null /usr/local/bin/crowdsec-healthcheck
     cat > /usr/local/bin/crowdsec-healthcheck <<'EOF'
@@ -422,7 +393,7 @@ if ! cscli metrics >/dev/null 2>&1; then
 fi
 EOF
     
-    # Health-Check systemd Service und Timer (Idempotenz durch ExecCondition)
+    # Health-Check systemd Service und Timer
     cat > /etc/systemd/system/crowdsec-healthcheck.service <<'EOF'
 [Unit]
 Description=CrowdSec Health-Check
@@ -458,7 +429,7 @@ EOF
 ExecReloadPost=/usr/bin/systemctl try-restart crowdsec-bouncer-setonly
 EOF
 
-    # --- 8. Services aktivieren mit Retry-Mechanismus ---
+    # --- 7. Services aktivieren mit Retry-Mechanismus ---
     systemctl daemon-reload
     
     if run_with_spinner "Aktiviere Set-Only-Bouncer und Health-Check..." "systemctl enable --now crowdsec-bouncer-setonly crowdsec-healthcheck.timer"; then
@@ -477,11 +448,13 @@ EOF
         fi
         
         # Weitere Verifikationen...
-        if ! grep -q "set-only: true" "$local_yml"; then
+        local local_yml="/etc/crowdsec/bouncers/crowdsec-firewall-bouncer.yaml.local"
+        if ! yq eval '.nftables.ipv4.set-only' "$local_yml" | grep -q "true"; then
             log_error "Set-only Modus nicht aktiviert!"
             verification_passed=false
         fi
         
+        local keyfile="/etc/crowdsec/bouncers/.api_key"
         if [ ! -s "$keyfile" ]; then
             log_error "API-Key-Datei fehlt oder ist leer"
             verification_passed=false
@@ -509,9 +482,7 @@ EOF
 tune_crowdsec_ssh_policy() {
     log_info "  -> Passe CrowdSec SSH-Policy an (Ban-Dauer: ${CROWDSEC_BANTIME})..."
     
-    # Nur eine lokale Profildatei erstellen, wenn die Ban-Dauer vom Standard abweicht.
-    # HINWEIS: Der MaxRetry-Wert wird von den CrowdSec-Szenarien selbst gehandhabt,
-    #          wir passen hier gezielt nur die Dauer der Verbannung an.
+    # Nur eine lokale Profildatei erstellen, wenn die Ban-Dauer vom Standard abweicht
     if [ "$CROWDSEC_BANTIME" != "4h" ]; then
         mkdir -p /etc/crowdsec/profiles.d/
         
