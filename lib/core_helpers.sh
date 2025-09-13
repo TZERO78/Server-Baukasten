@@ -89,6 +89,20 @@ check_ipv6_nat_kernel() {
     fi
 }
 
+## Key-Value in Datei setzen/ersetzen (idempotent, robust)
+set_config_value() {
+	local file="$1"
+	local key="$2"
+	local value="$3"
+	
+	if grep -qE "^\s*${key}\s+" "$file"; then
+		sed -i -E "s|^\s*(${key}\s+).*|\1${value}|" "$file"
+	else
+		echo "${key} ${value}" >> "$file"
+	fi
+}	
+
+
 ## Spinner-Ausführung (failsafe Farben)
 run_with_spinner() {
     local title="$1" command="$2"
