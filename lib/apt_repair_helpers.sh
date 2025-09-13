@@ -3,7 +3,7 @@
 #
 # APT-REPAIR & PROVIDER-DETECTION HELPER
 #
-# @description: Provider-spezifische APT-Probleme erkennen & idempotent beheben
+# @description: Provider-spezifische APT-Probleme erkennen & beheben – idempotent
 # @author:      Server-Baukasten (TZERO78) & KI-Assistenten
 # @version:     1.2.0
 # @license:     MIT
@@ -13,13 +13,15 @@
 # --- Basics -------------------------------------------------------------------
 set -Eeuo pipefail
 
-# Fallback-Logs (falls kein globaler log_helper geladen ist) -------------------
+# Fallback-Logs, immer auf STDERR (wichtig für Command Substitution!) -----------
 if ! command -v log_info >/dev/null 2>&1; then
-  log_info()  { echo -e "ℹ️  $*"; }
-  log_ok()    { echo -e "✅ $*"; }
-  log_warn()  { echo -e "⚠️  $*"; }
-  log_error() { echo -e "❌ $*" >&2; }
-  log_debug() { [ "${DEBUG:-false}" = "true" ] && echo -e "🐞  $*" >&2 || true; }
+  log_info()  { printf "ℹ️  %s\n" "$*" >&2; }
+  log_ok()    { printf "✅ %s\n" "$*" >&2; }
+  log_warn()  { printf "⚠️  %s\n" "$*" >&2; }
+  log_error() { printf "❌ %s\n" "$*" >&2; }
+fi
+if ! command -v log_debug >/dev/null 2>&1; then
+  log_debug() { [ "${DEBUG:-false}" = "true" ] && printf "🐞  %s\n" "$*" >&2 || true; }
 fi
 
 # Kleine Helfer ----------------------------------------------------------------
@@ -50,7 +52,6 @@ _http_get() {
   fi
 }
 
-# Proxy-Erkennung (robust für set -u)
 _have_proxy() { [ -n "${HTTP_PROXY:-}${http_proxy:-}${HTTPS_PROXY:-}${https_proxy:-}${NO_PROXY:-}${no_proxy:-}" ]; }
 
 # Auf APT/DPKG-Locks warten (statt sie zu löschen)
@@ -70,41 +71,54 @@ apt_wait_for_locks() {
   dpkg --configure -a || true
 }
 
-# Idempotenz-Helfer: schreibe Datei nur, wenn Inhalt sich ändert --------------
-ensure_file_content() {
-  local target="$1"; shift
+# Datei-Sanitizer: CRLF/BOM entfernen & nur gültige Zeilen behalten ------------
+sanitize_sources_file() {
+  local file="$1"
+  [ -f "$file" ] || return 0
+
   local tmp; tmp="$(mktemp)"
-  cat >"$tmp" <<<"$*"
-  if [ ! -f "$target" ] || ! cmp -s "$tmp" "$target"; then
-    mkdir -p "$(dirname "$target")"
-    mv -f "$tmp" "$target"
-    return 0  # geändert
-  else
-    rm -f "$tmp"
-    return 1  # unverändert
+  cp -a "$file" "$tmp"
+
+  # CRLF -> LF, DOS-EOF (^Z) weg, BOM weg
+  sed -i 's/\r$//' "$tmp" || true
+  sed -i 's/\x1a$//' "$tmp" || true
+  sed -i '1s/^\xEF\xBB\xBF//' "$tmp" || true
+
+  # Nicht-deb-Zeilen zu Kommentaren machen, gültige deb/deb-src durchlassen
+  awk '
+    /^[[:space:]]*#/ || /^[[:space:]]*$/                              { print; next }
+    /^[[:space:]]*deb(-src)?([[:space:]]|\[)/                           { print; next }
+    { print "# (commented by Server-Baukasten) " $0 }
+  ' "$tmp" > "$tmp.norm" && mv -f "$tmp.norm" "$tmp"
+
+  # Mehrfache Leerzeichen normalisieren (nur in deb-Zeilen)
+  awk '{ if($1 ~ /^deb(-src)?$/) { $1=$1; gsub(/[\t ]+/," "); } print }' "$tmp" > "$tmp.norm" && mv -f "$tmp.norm" "$tmp"
+
+  # Nur ersetzen, wenn sich der Inhalt ändert (idempotent)
+  if ! cmp -s "$file" "$tmp"; then
+    log_debug "    - Sanitize: korrigiere ungültige Zeilen in $(basename "$file")"
+    cp -f "$tmp" "$file"
   fi
+  rm -f "$tmp"
 }
 
 # ----------------------------------------------------------------------------
 # Provider Detection
 # ----------------------------------------------------------------------------
-# Erkennt VPS-Provider anhand verschiedener Merkmale
-# @return: provider-name oder "generic"
+# Erkennt VPS-Provider anhand verschiedener Merkmale – gibt NUR den Namen aus!
 detect_vps_provider() {
   local provider="generic"
 
   log_debug "  -> Starte VPS-Provider-Detection..."
 
   # IONOS (1&1)
-  if grep -qi "ionos\|1und1\|1and1" /etc/resolv.conf 2>/dev/null || \
-     [ -d /etc/apt/mirrors ]; then
+  if grep -qi "ionos\|1und1\|1and1" /etc/resolv.conf 2>/dev/null || [ -d /etc/apt/mirrors ]; then
     provider="ionos"; log_info "  -> IONOS/1&1 VPS erkannt"
     log_debug "    - Mirror-Verzeichnis: $([ -d /etc/apt/mirrors ] && echo 'vorhanden' || echo 'nicht vorhanden')"
 
   # Hetzner
-  elif grep -qi "hetzner\|your-server\.de" /etc/resolv.conf 2>/dev/null || \
-       grep -qi "hetzner" /etc/hostname 2>/dev/null || \
-       [ -f /etc/hetzner ]; then
+  elif grep -qi "hetzner\|your-server\\.de" /etc/resolv.conf 2>/dev/null || \
+       grep -qi "hetzner" /etc/hostname 2>/dev/null || [ -f /etc/hetzner ]; then
     provider="hetzner"; log_info "  -> Hetzner VPS erkannt"
 
   # DigitalOcean (IMDS v1: numerische Droplet-ID)
@@ -154,7 +168,7 @@ detect_vps_provider() {
     log_debug "  -> Kein spezifischer Provider erkannt, nutze generic"
   fi
 
-  echo "$provider"
+  printf '%s\n' "$provider"
 }
 
 # ----------------------------------------------------------------------------
@@ -166,11 +180,8 @@ apply_provider_apt_fixes() {
 
   case "$provider" in
     ionos)
-      # IONOS Mirror-Listen/Cfgs aufräumen
-      [ -d /etc/apt/mirrors ] && find /etc/apt/mirrors -type f -name '*.list' -delete 2>/dev/null || true
-      rm -f /etc/apt/apt.conf.d/99ionos* \
-            /etc/apt/sources.list.d/*ionos* \
-            /etc/apt/preferences.d/*ionos* 2>/dev/null || true
+      [ -d /etc/apt/mirrors ] && rm -f /etc/apt/mirrors/*.list 2>/dev/null && log_debug "    - IONOS Mirror-Listen entfernt"
+      rm -f /etc/apt/apt.conf.d/99ionos* 2>/dev/null || true
       ;;
 
     hetzner)
@@ -211,8 +222,8 @@ apply_general_apt_cleanup() {
   # Veraltete Mirror-Kommentare entfernen
   sed -i '/^#.*mirror\./d' /etc/apt/sources.list 2>/dev/null || true
 
-  # Netzwerk-Resilience Drop-in (idempotent)
-  ensure_file_content /etc/apt/apt.conf.d/99-sbk-net.conf $'Acquire::Retries "3";\nAcquire::http::Pipeline-Depth "0";\n' || true
+  # Optional: Sanitizer laufen lassen
+  sanitize_sources_file "/etc/apt/sources.list"
 
   # Proxy-Configs nicht blind löschen – nur Hinweis loggen
   if ! _have_proxy; then
@@ -221,14 +232,14 @@ apply_general_apt_cleanup() {
 }
 
 # ----------------------------------------------------------------------------
-# OS-Erkennung & Ubuntu-Ports-Unterstützung
+# OS-Erkennung
 # ----------------------------------------------------------------------------
 detect_os_version() {
   local os_id="unknown" os_version="unknown" os_codename="unknown"
 
   if [ -f /etc/os-release ]; then
     # shellcheck source=/dev/null
-    source /etc/os-release
+    . /etc/os-release
     os_id="${ID:-unknown}"; os_version="${VERSION_ID:-unknown}"; os_codename="${VERSION_CODENAME:-unknown}"
   fi
 
@@ -245,63 +256,52 @@ detect_os_version() {
     esac
   fi
 
-  echo "$os_id $os_version $os_codename"
-}
-
-is_ubuntu_ports_arch() {
-  case "$(dpkg --print-architecture 2>/dev/null || echo unknown)" in
-    arm64|armhf|ppc64el|s390x|riscv64) return 0 ;;
-    *) return 1 ;;
-  esac
+  printf '%s %s %s\n' "$os_id" "$os_version" "$os_codename"
 }
 
 # ----------------------------------------------------------------------------
-# sources.list Generatoren
+# sources.list Generatoren (nur Kommentare + gültige deb-Zeilen)
 # ----------------------------------------------------------------------------
 generate_debian_sources() {
   local codename="${1:-stable}" protocol="${2:-https}"
+  local provider_tag
+  provider_tag="$(printf '%s' "${VPS_PROVIDER:-unknown}" | awk '{print $1}')"
   cat << EOF
 # Debian $codename - Official Repositories
-# Generated by Server-Baukasten on $(date)
-# Provider: ${VPS_PROVIDER:-unknown}
+# Generated by Server-Baukasten on $(date -u +'%Y-%m-%dT%H:%M:%SZ')
+# Provider: ${provider_tag}
 
-deb ${protocol}://deb.debian.org/debian/ ${codename} main contrib non-free non-free-firmware
-deb ${protocol}://deb.debian.org/debian/ ${codename}-updates main contrib non-free non-free-firmware
+deb ${protocol}://deb.debian.org/debian ${codename} main contrib non-free non-free-firmware
+deb ${protocol}://deb.debian.org/debian ${codename}-updates main contrib non-free non-free-firmware
 deb ${protocol}://security.debian.org/debian-security ${codename}-security main contrib non-free non-free-firmware
 
 # Backports (optional, uncomment if needed)
-#deb ${protocol}://deb.debian.org/debian/ ${codename}-backports main contrib non-free non-free-firmware
-
-# Source packages (optional, uncomment if needed)
-#deb-src ${protocol}://deb.debian.org/debian/ ${codename} main contrib non-free non-free-firmware
+#deb ${protocol}://deb.debian.org/debian ${codename}-backports main contrib non-free non-free-firmware
 EOF
 }
 
 generate_ubuntu_sources() {
   local codename="${1:-focal}" protocol="${2:-https}"
-  local main_host="archive.ubuntu.com" sec_host="security.ubuntu.com"
-  if is_ubuntu_ports_arch; then
-    main_host="ports.ubuntu.com"; sec_host="ports.ubuntu.com"
-  fi
+  local provider_tag
+  provider_tag="$(printf '%s' "${VPS_PROVIDER:-unknown}" | awk '{print $1}')"
   cat << EOF
 # Ubuntu $codename - Official Repositories
-# Generated by Server-Baukasten on $(date)
-# Provider: ${VPS_PROVIDER:-unknown}
+# Generated by Server-Baukasten on $(date -u +'%Y-%m-%dT%H:%M:%SZ')
+# Provider: ${provider_tag}
 
-deb ${protocol}://${main_host}/ubuntu/ ${codename} main restricted universe multiverse
-deb ${protocol}://${main_host}/ubuntu/ ${codename}-updates main restricted universe multiverse
-deb ${protocol}://${sec_host}/ubuntu/ ${codename}-security main restricted universe multiverse
+deb ${protocol}://archive.ubuntu.com/ubuntu ${codename} main restricted universe multiverse
+deb ${protocol}://archive.ubuntu.com/ubuntu ${codename}-updates main restricted universe multiverse
+deb ${protocol}://security.ubuntu.com/ubuntu ${codename}-security main restricted universe multiverse
 
 # Backports (optional, uncomment if needed)
-#deb ${protocol}://${main_host}/ubuntu/ ${codename}-backports main restricted universe multiverse
-
-# Source packages (optional, uncomment if needed)
-#deb-src ${protocol}://${main_host}/ubuntu/ ${codename} main restricted universe multiverse
+#deb ${protocol}://archive.ubuntu.com/ubuntu ${codename}-backports main restricted universe multiverse
+# Partner repository (optional)
+#deb ${protocol}://archive.canonical.com/ubuntu ${codename} partner
 EOF
 }
 
 # ----------------------------------------------------------------------------
-# Hauptfunktion (idempotent)
+# Hauptfunktion
 # ----------------------------------------------------------------------------
 fix_apt_sources_if_needed() {
   log_info "  -> Prüfe und repariere APT-Quellen..."
@@ -315,51 +315,75 @@ fix_apt_sources_if_needed() {
   read -r os_id os_version os_codename <<< "$(detect_os_version)"
   log_debug "    - OS: $os_id $os_version ($os_codename)"
 
-  # Soll-Konfiguration erzeugen (tmp)
-  local tmp; tmp="$(mktemp)"
-  case "$os_id" in
-    debian) generate_debian_sources "$os_codename" "https" > "$tmp" ;;
-    ubuntu) generate_ubuntu_sources "$os_codename" "https" > "$tmp" ;;
-    *)      log_error "  -> OS '$os_id' nicht unterstützt"; rm -f "$tmp"; return 1 ;;
-  esac
+  # Vorprüfung: sources.list sanitisieren, falls vorhanden (idempotent)
+  [ -f /etc/apt/sources.list ] && sanitize_sources_file "/etc/apt/sources.list"
 
-  # Ist-vs-Soll vergleichen → nur ersetzen, wenn abweichend
-  local changed=false
-  if [ ! -f /etc/apt/sources.list ] || ! cmp -s "$tmp" /etc/apt/sources.list; then
-    local TS; TS="$(date +%Y%m%d_%H%M%S)"
-    [ -f /etc/apt/sources.list ] && cp -a /etc/apt/sources.list "/etc/apt/sources.list.backup.$TS"
-    mv -f "$tmp" /etc/apt/sources.list
-    changed=true
-    log_debug "    - /etc/apt/sources.list wurde aktualisiert"
-  else
-    rm -f "$tmp"
-    log_debug "    - /etc/apt/sources.list ist bereits korrekt"
-  fi
-
-  # Prüfen, ob grundsätzlich offizielle Repos sichtbar sind
+  # Prüfungen
   local needs_fix=false
-  if ! grep -qE '^deb\s+' /etc/apt/sources.list 2>/dev/null; then
+  if [ ! -f /etc/apt/sources.list ] || ! grep -qE "^deb\\s+" /etc/apt/sources.list 2>/dev/null; then
     needs_fix=true; log_warn "  -> APT-Quellen fehlen oder sind ungültig"
   fi
   if ! apt-cache policy 2>/dev/null | grep -qE "o=(Debian|Ubuntu)"; then
     needs_fix=true; log_warn "  -> Keine offiziellen Repositories verfügbar"
   fi
 
-  # apt-get update nur wenn nötig/ sinnvoll
-  local update_required=false
-  { $changed || $needs_fix; } && update_required=true
+  # Reparatur wenn nötig
+  if [ "$needs_fix" = true ]; then
+    local TS tmp backup_sl backup_sld new_content
+    TS="$(date +%Y%m%d_%H%M%S)"
 
-  if $update_required; then
-    apt_wait_for_locks
-    if ! apt-get -o DPkg::Lock::Timeout=60 update; then
-      log_warn "  -> Update fehlgeschlagen – parke /etc/apt/sources.list.d und versuche erneut"
-      local TS2; TS2="$(date +%Y%m%d_%H%M%S)"
-      if [ -d /etc/apt/sources.list.d ]; then
-        mv /etc/apt/sources.list.d "/etc/apt/sources.list.d.disabled.${TS2}"
-      fi
-      apt_wait_for_locks
-      apt-get -o DPkg::Lock::Timeout=60 update || { log_error "  -> Update bleibt kaputt – manuelle Prüfung nötig"; return 1; }
+    # Backups (idempotent: vorhandene Backups nicht überschreiben)
+    if [ -f /etc/apt/sources.list ] && [ ! -f /etc/apt/sources.list.backup."$TS" ]; then
+      cp -a /etc/apt/sources.list "/etc/apt/sources.list.backup.$TS"
+      backup_sl="/etc/apt/sources.list.backup.$TS"
     fi
+    if [ -d /etc/apt/sources.list.d ]; then
+      # nur parken, nicht löschen – verschieben statt tar (leichter rückgängig)
+      local park_dir="/etc/apt/sources.list.d.disabled-$TS"
+      if [ ! -d "$park_dir" ]; then
+        mv /etc/apt/sources.list.d "$park_dir"
+        mkdir -p /etc/apt/sources.list.d
+        backup_sld="$park_dir"
+        log_warn "  -> sources.list.d nach $(basename "$park_dir") verschoben"
+      fi
+    fi
+
+    # Neue sources erzeugen (atomar)
+    tmp=$(mktemp)
+    case "$os_id" in
+      debian) generate_debian_sources "$os_codename" "https" > "$tmp" ;;
+      ubuntu) generate_ubuntu_sources "$os_codename" "https" > "$tmp" ;;
+      *)      log_error "  -> OS '$os_id' nicht unterstützt"; return 1 ;;
+    esac
+
+    # Nur schreiben, wenn sich der Inhalt unterscheidet
+    if [ ! -f /etc/apt/sources.list ] || ! cmp -s "$tmp" /etc/apt/sources.list; then
+      mv -f "$tmp" /etc/apt/sources.list
+    else
+      rm -f "$tmp"
+    fi
+
+    apt_wait_for_locks
+
+    # APT selbst warten lassen (zusätzlich zur Polling-Wartefunktion)
+    if ! apt-get -o DPkg::Lock::Timeout=60 update; then
+      log_warn "  -> Update fehlgeschlagen – versuche Sanitize & zweiten Versuch"
+      sanitize_sources_file "/etc/apt/sources.list"
+      if ! apt-get -o DPkg::Lock::Timeout=60 update; then
+        log_error "❌ Reparatur der APT-Quellen fehlgeschlagen (zweiter Versuch)"
+        # Rollback der geparkten Verzeichnisse (best effort)
+        if [ -n "${backup_sld:-}" ] && [ -d "$backup_sld" ]; then
+          rm -rf /etc/apt/sources.list.d
+          mv "$backup_sld" /etc/apt/sources.list.d
+        fi
+        # ggf. altes sources.list-Backup zurückspielen
+        if [ -n "${backup_sl:-}" ] && [ -f "$backup_sl" ]; then
+          cp -f "$backup_sl" /etc/apt/sources.list
+        fi
+        return 1
+      fi
+    fi
+
     log_ok "✅ APT-Quellen repariert"
   else
     log_ok "  -> APT-Quellen sind funktionsfähig"
