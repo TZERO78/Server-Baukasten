@@ -345,12 +345,12 @@ main() {
     # 4. Globale Variablen exportieren
     export SCRIPT_VERBOSE DEBUG TEST_MODE CONFIG_FILE
 
-    # 5. Zeige Header 
-    show_startup_header 
-    
-    # 6. Abhängigkeiten laden
+    # 5. Abhängigkeiten laden
     load_libraries
     load_modules
+
+    # 6. Zeige Header 
+    show_startup_header 
     
     # 7. Jetzt erst den echten Error-Handler setzen (rollback existiert jetzt)
     trap 'rollback' ERR
