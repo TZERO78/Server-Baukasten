@@ -307,47 +307,59 @@ EOF
     # --- 3. Bouncer ist bereits installiert, nur noch konfigurieren ---
     configure_bouncer
 
-    # --- 4. Services aktivieren und Start verifizieren ---
+    # --- 4. CrowdSec-Installation validieren und reparieren ---
+    log_info "  -> Validiere CrowdSec-Installation..."
+    
+    # Prüfe ob Konfigurationsdateien existieren
+    if [ ! -f "/etc/crowdsec/config.yaml" ] || [ ! -d "/etc/crowdsec" ]; then
+        log_warn "CrowdSec-Konfiguration fehlt - repariere Installation..."
+        
+        # Stoppe Service falls läuft
+        systemctl stop crowdsec 2>/dev/null || true
+        
+        # Komplette Neuinstallation
+        if ! run_with_spinner "Repariere CrowdSec-Installation..." "apt-get remove --purge -y crowdsec >/dev/null 2>&1 || true && DEBIAN_FRONTEND=noninteractive apt-get install -y crowdsec >/dev/null 2>&1"; then
+            log_error "CrowdSec-Reparatur fehlgeschlagen"
+            return 1
+        fi
+        
+        log_ok "CrowdSec-Installation repariert"
+    fi
+
+    # --- 5. Services aktivieren und Start verifizieren ---
     log_info "  -> Aktiviere CrowdSec-Dienste und warte auf den Start..."
     systemctl daemon-reload
     systemctl enable --now crowdsec >/dev/null 2>&1
 
-    # Ein Befehl, der 30s lang versucht, die API zu erreichen
+    # Robuste API-Wartezeit mit Config-Prüfung
     local wait_cmd="
-        for i in {1..30}; do
-            if systemctl is-active --quiet crowdsec && cscli metrics &>/dev/null; then exit 0; fi
-            sleep 1
+        for i in {1..45}; do
+            if [ -f '/etc/crowdsec/config.yaml' ] && systemctl is-active --quiet crowdsec && cscli metrics &>/dev/null; then 
+                exit 0
+            fi
+            sleep 2
         done
         exit 1"
     
-    if run_with_spinner "Warte auf CrowdSec-API..." "bash -c \"$wait_cmd\""; then
+    if run_with_spinner "Warte auf CrowdSec-API (bis zu 90s)..." "bash -c \"$wait_cmd\""; then
         log_ok "CrowdSec-Agent ist erfolgreich gestartet und API ist erreichbar"
         return 0
     else
         log_error "CrowdSec-Agent konnte nicht gestartet werden oder die API antwortet nicht"
+        log_info "Debug: systemctl status crowdsec && ls -la /etc/crowdsec/"
         return 1
     fi
 }
 
 ##
-# Konfiguriert den Firewall-Bouncer (Pakete sind bereits installiert)
+# Konfiguriert den Firewall-Bouncer (CrowdSec muss bereits laufen!)
 ##
 configure_bouncer() {
     log_info "🐾 Konfiguriere CrowdSec-Bouncer (NFTables-Integration)..."
-    log_debug "Bouncer-Konfiguration gestartet mit DEBUG-Modus"
+    log_debug "Bouncer-Konfiguration gestartet - CrowdSec API sollte bereits laufen"
 
-    # --- 1. Voraussetzungen prüfen ---
-    log_info "  -> Prüfe Voraussetzungen (CrowdSec-Service & API)..."
-    if ! systemctl is-active --quiet crowdsec; then
-        log_error "Voraussetzung nicht erfüllt: CrowdSec-Service läuft nicht"
-        return 1
-    fi
-    
-    if ! cscli metrics >/dev/null 2>&1; then
-        log_error "Voraussetzung nicht erfüllt: CrowdSec API ist nicht erreichbar"
-        return 1
-    fi
-    
+    # --- 1. Voraussetzungen prüfen (API muss bereits laufen!) ---
+    log_info "  -> Prüfe Voraussetzungen..."
     if ! command -v nft >/dev/null 2>&1; then
         log_error "NFTables nicht installiert!"
         return 1
@@ -358,24 +370,22 @@ configure_bouncer() {
         return 1
     fi
     
-    log_ok "Voraussetzungen erfüllt: CrowdSec-Service, API, NFTables und yq verfügbar"
+    # API-Check entfernt - wird von install_crowdsec_stack() bereits gemacht
+    log_ok "Voraussetzungen erfüllt: NFTables und yq verfügbar"
 
-    # --- 2. Paket-Integrität prüfen und reparieren ---   <-- HIER
-    log_info "  -> Prüfe Bouncer-Paket-Integrität..."
-    if dpkg --verify crowdsec-firewall-bouncer 2>&1 | grep -q "missing"; then
-        log_warn "Beschädigte Paket-Installation erkannt - repariere..."
-        if ! run_with_spinner "Repariere Bouncer-Paket..." "DEBIAN_FRONTEND=noninteractive apt-get install --reinstall -y crowdsec-firewall-bouncer >/dev/null 2>&1"; then
-            log_error "Paket-Reparatur fehlgeschlagen"
-            return 1
-        fi
-        log_ok "Paket-Integrität wiederhergestellt"
-    else
-        log_debug "Paket-Integrität in Ordnung"
-    fi
-
-    # --- 2. Konfigurationsdateien vorbereiten ---
+    # --- 2. Bouncer-Installation validieren ---
     local dir="/etc/crowdsec/bouncers"
     local base_yml="$dir/crowdsec-firewall-bouncer.yaml"
+    
+    # Prüfe ob Bouncer-Verzeichnis existiert
+    if [ ! -d "$dir" ]; then
+        log_warn "Bouncer-Verzeichnis fehlt - reinstalliere Bouncer-Paket..."
+        if ! run_with_spinner "Reinstalliere Bouncer-Paket..." "apt-get remove --purge -y crowdsec-firewall-bouncer >/dev/null 2>&1 || true && DEBIAN_FRONTEND=noninteractive apt-get install -y crowdsec-firewall-bouncer >/dev/null 2>&1"; then
+            log_error "Bouncer-Reinstallation fehlgeschlagen"
+            return 1
+        fi
+        log_ok "Bouncer-Paket reinstalliert"
+    fi
     
     # BOUNCER IST BEREITS INSTALLIERT - nur Konfiguration prüfen
     if [ ! -f "$base_yml" ]; then
