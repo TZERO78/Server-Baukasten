@@ -254,7 +254,7 @@ run_setup() {
     log_info "Phase 2/5: System-Fundament (OS, Pakete, Kernel)..."
     
     detect_os
-    module_fix_apt_sources
+    #module_fix_apt_sources
     module_base
 	module_install_services
     module_system_update "$TEST_MODE"
