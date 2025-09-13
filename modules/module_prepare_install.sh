@@ -34,44 +34,54 @@ fi
 # ──────────────────────────────────────────────────────────────────────────────
 # Modul-Einstiegspunkt
 # ──────────────────────────────────────────────────────────────────────────────
+# Phase 1: Vorbereitung & System-Grundlagen (nur Orchestrierung)
 module_prepare_install() {
   log_info "Phase 1: Vorbereitung & System-Grundlagen (Prepare)"
   log_info "Vorbereitungen: Grundpakete & dpkg/apt entsperren"
 
-  # OS/Host-Info (nur Debug)
+  # --- Host/OS-Info (nur Debug) ---------------------------------------------
   if [ -r /etc/os-release ]; then
     # shellcheck source=/dev/null
     . /etc/os-release
-    log_debug "System: Hostname=$(hostname -f 2>/dev/null || hostname), Kernel=$(uname -r), Arch=$(uname -m)"
+    log_debug "System: host=$(hostname -f 2>/dev/null || hostname), kernel=$(uname -r), arch=$(uname -m)"
     log_debug "OS: ID=${ID:-?} VERSION_ID=${VERSION_ID:-?} CODENAME=${VERSION_CODENAME:-?}"
   fi
 
   explain "Wir stellen sicher, dass apt/dpkg frei sind und Basis-Tools vorhanden sind."
 
-  # APT/DPKG-Locks abwarten
-  apt_wait_for_locks
+  # --- APT/DPKG-Locks abwarten ----------------------------------------------
+  if type -t apt_wait_for_locks >/dev/null 2>&1; then
+    apt_wait_for_locks
+  else
+    log_debug "apt_wait_for_locks nicht verfügbar – einfacher Fallback (dpkg --configure -a)"
+    dpkg --configure -a >/dev/null 2>&1 || true
+  fi
 
-  # APT-Quellen prüfen/reparieren (idempotent)
+  # --- APT-Quellen prüfen/reparieren (Delegation) ----------------------------
+  # Kein Idempotenz- oder Sanitize-Code hier; alles macht apt_repair_helpers.sh
   if type -t fix_apt_sources_if_needed >/dev/null 2>&1; then
-    # IONOS explizit anstoßen; ansonsten idempotent immer ok
+    # Nur Hinweis-Log; die eigentlichen Details loggt der Helper.
     if [ -d /etc/apt/mirrors ] || [ "${VPS_PROVIDER:-}" = "ionos" ]; then
       log_warn "  -> IONOS/Problem-Provider erkannt – repariere APT-Quellen…"
     else
-      log_info "  -> Prüfe und repariere APT-Quellen (falls nötig)…"
+      log_info "  -> Prüfe APT-Quellen (Reparatur bei Bedarf)…"
     fi
     if ! fix_apt_sources_if_needed; then
       log_error "Reparatur der APT-Quellen fehlgeschlagen."
       exit 1
     fi
   else
-    log_debug "Kein APT-Repair-Helper geladen – überspringe Provider-Fixes."
+    log_debug "apt_repair_helpers nicht geladen – überspringe APT-Reparatur."
   fi
 
-  # Paketlisten aktualisieren (max. 3 Versuche)
+  # --- Paketlisten aktualisieren (robuste 3×-Retry) --------------------------
   local tries=0
-  while true; do
+  while :; do
     tries=$((tries+1))
-    if run_with_spinner "Paketlisten aktualisieren (Versuch ${tries}/3)" "apt-get -o DPkg::Lock::Timeout=60 update"; then
+    log_debug "apt-get update (Versuch ${tries}/3)"
+    if run_with_spinner "Paketlisten aktualisieren (Versuch ${tries}/3)" \
+         "apt-get -o DPkg::Lock::Timeout=60 update"; then
+      log_ok "Paketlisten aktualisiert."
       break
     fi
     if [ $tries -ge 3 ]; then
@@ -80,10 +90,12 @@ module_prepare_install() {
     fi
     log_warn "apt-get update fehlgeschlagen – erneuter Versuch in 5s…"
     sleep 5
-    apt_wait_for_locks
+    if type -t apt_wait_for_locks >/dev/null 2>&1; then apt_wait_for_locks; fi
   done
 
-  # Fehlende Basis-Tools ermitteln
+  # --- Minimal nötige Basis-Tools nachziehen --------------------------------
+  # (Nur das, was wir in dieser frühen Phase brauchen; alles Weitere später
+  #  im module_install_services – so vermeiden wir Konflikte & Redundanzen.)
   local to_install=()
   command -v curl      >/dev/null 2>&1 || to_install+=(curl)
   command -v wget      >/dev/null 2>&1 || to_install+=(wget)
@@ -95,7 +107,8 @@ module_prepare_install() {
 
   if [ ${#to_install[@]} -gt 0 ]; then
     log_info "Installiere Basis-Tools: ${to_install[*]}"
-    if ! run_with_spinner "Installiere Basis-Tools" "DEBIAN_FRONTEND=noninteractive apt-get install -y ${to_install[*]}"; then
+    if ! run_with_spinner "Installiere Basis-Tools…" \
+         "DEBIAN_FRONTEND=noninteractive apt-get install -y ${to_install[*]}"; then
       log_error "Installation der Basis-Tools fehlgeschlagen."
       exit 1
     fi
@@ -104,8 +117,7 @@ module_prepare_install() {
     log_ok "Alle Basis-Tools bereits vorhanden."
   fi
 
-  # APT/DPKG-Locks ein letztes Mal räumen lassen
-  apt_wait_for_locks
-
+  # --- Locks final räumen ----------------------------------------------------
+  if type -t apt_wait_for_locks >/dev/null 2>&1; then apt_wait_for_locks; fi
   log_ok "Phase 1 abgeschlossen."
 }
