@@ -288,11 +288,6 @@ install_packages_safe() {
     return 1
   fi
 
-  # Minimal: wenn crowdsec frisch installiert wurde, Basiskonfig sicherstellen
-  if printf '%s\n' "${missing[@]}" | grep -qx 'crowdsec'; then
-    type ensure_crowdsec_basics >/dev/null 2>&1 && ensure_crowdsec_basics || true
-  fi
-
   log_ok "Pakete installiert."
 }
 
