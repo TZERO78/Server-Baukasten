@@ -38,9 +38,12 @@ cleanup_crowdsec() {
 }
 
 ensure_crowdsec_hub_perms() {
-  # Eigentümer & Rechte für Laufzeitdaten korrekt setzen
-  install -d -m 0755 -o crowdsec -g crowdsec /var/lib/crowdsec /var/lib/crowdsec/hub /var/lib/crowdsec/data
-  chown -R crowdsec:crowdsec /var/lib/crowdsec
+  install -d -m0755 /var/lib/crowdsec /var/lib/crowdsec/hub /var/lib/crowdsec/data
+  if getent passwd crowdsec >/dev/null 2>&1; then
+    chown -R crowdsec:crowdsec /var/lib/crowdsec
+  else
+    chown -R root:root /var/lib/crowdsec
+  fi
   chmod 0755 /var/lib/crowdsec /var/lib/crowdsec/hub /var/lib/crowdsec/data
 }
 
