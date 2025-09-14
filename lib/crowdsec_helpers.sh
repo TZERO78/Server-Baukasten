@@ -121,8 +121,8 @@ set_bouncer_api_key_yq() {
 create_setonly_bouncer_service() {
   log_info "  -> Erstelle dedizierten systemd-Service für set-only Mode..."
   local service_file="/etc/systemd/system/crowdsec-bouncer-setonly.service"
-  local config_file="/etc/crowdsec/bouncers/crowdsec-firewall-bouncer.yaml.local"
-  export CONFIG_FILE="$crowdsec_config_file"
+  local crowdsec_config_file="/etc/crowdsec/bouncers/crowdsec-firewall-bouncer.yaml.local"
+  export crowdsec_config_file="$crowdsec_config_file"
 
 
 
@@ -134,7 +134,7 @@ create_setonly_bouncer_service() {
     log_warn "CrowdSec NFTables-Struktur nicht gefunden - wird bei nächstem nftables-Reload geladen"
   fi
 
-  # Template holen & auswerten (setzt CONFIG_FILE im Template voraus)
+  # Template holen & auswerten (setzt crowdsec_config_file im Template voraus)
   download_and_process_template "crowdsec-bouncer-setonly.service.template" \
                                 "$service_file" "644" "root:root"
 
