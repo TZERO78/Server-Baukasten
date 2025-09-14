@@ -30,11 +30,47 @@ setup_crowdsec_repository() {
 
 ## Bereinigt CrowdSec für Neuinstallation
 cleanup_crowdsec() {
-  log_info "Bereinige CrowdSec für Neuinstallation..."
-  apt-get remove --purge -y crowdsec crowdsec-firewall-bouncer >/dev/null 2>&1 || true
-  rm -rf /etc/crowdsec /var/lib/crowdsec
-  apt-get autoremove -y >/dev/null 2>&1 || true
-  log_ok "CrowdSec bereinigt"
+    log_info "Bereinige CrowdSec für Neuinstallation..."
+    
+    # Prüfen ob CrowdSec überhaupt installiert ist
+    if ! command -v cscli >/dev/null 2>&1 && ! dpkg -l | grep -q crowdsec; then
+        log_info "CrowdSec nicht installiert - überspringe Bereinigung"
+        return 0
+    fi
+    
+    # Services stoppen vor der Bereinigung (falls vorhanden)
+    systemctl stop crowdsec crowdsec-firewall-bouncer crowdsec-bouncer-setonly 2>/dev/null || true
+    
+    # Collections explizit entfernen (nur wenn cscli verfügbar)
+    if command -v cscli >/dev/null 2>&1; then
+        cscli collections remove crowdsecurity/sshd 2>/dev/null || true
+        cscli collections remove crowdsecurity/linux 2>/dev/null || true
+        log_debug "Collections entfernt"
+    fi
+    
+    # Pakete entfernen (falls installiert)
+    apt-get remove --purge -y crowdsec crowdsec-firewall-bouncer 2>/dev/null || true
+    
+    # Verzeichnisse löschen (falls vorhanden)
+    [ -d /etc/crowdsec ] && rm -rf /etc/crowdsec
+    [ -d /var/lib/crowdsec ] && rm -rf /var/lib/crowdsec
+    [ -d /var/log/crowdsec ] && rm -rf /var/log/crowdsec
+    
+    # Custom systemd-Services entfernen (falls vorhanden)
+    [ -f /etc/systemd/system/crowdsec-bouncer-setonly.service ] && rm -f /etc/systemd/system/crowdsec-bouncer-setonly.service
+    [ -f /etc/systemd/system/crowdsec-healthcheck.service ] && rm -f /etc/systemd/system/crowdsec-healthcheck.service
+    [ -f /etc/systemd/system/crowdsec-healthcheck.timer ] && rm -f /etc/systemd/system/crowdsec-healthcheck.timer
+    [ -f /etc/systemd/system/nftables.service.d/crowdsec.conf ] && rm -f /etc/systemd/system/nftables.service.d/crowdsec.conf
+    
+    systemctl daemon-reload 2>/dev/null || true
+    
+    # Health-Check-Script entfernen (falls vorhanden)
+    [ -f /usr/local/bin/crowdsec-healthcheck ] && rm -f /usr/local/bin/crowdsec-healthcheck
+    
+    # Autoremove
+    apt-get autoremove -y 2>/dev/null || true
+    
+    log_ok "CrowdSec bereinigt"
 }
 
 ensure_crowdsec_hub_perms() {

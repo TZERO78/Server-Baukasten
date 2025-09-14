@@ -213,30 +213,31 @@ setup_intrusion_prevention() {
     tune_crowdsec_ssh_policy
     
 	# Collections installieren mit Robustheitsprüfung
-	log_info "  -> Installiere CrowdSec Collections..."
-	if run_with_spinner "Aktualisiere Hub-Index..." "cscli hub update 2>/dev/null"; then
-		if run_with_spinner "Installiere SSH- und Linux-Collections..." \
-		"cscli collections install crowdsecurity/sshd crowdsecurity/linux 2>/dev/null"; then
-			log_ok "Collections erfolgreich installiert"
-			
-			# Collections-Status verifizieren (auch tainted Collections zählen)
-			local installed_collections
-			installed_collections=$(cscli collections list 2>/dev/null | grep -E "crowdsecurity/(sshd|linux).*enabled" | wc -l || echo 0)
-			if [ "$installed_collections" -ge 2 ]; then
-				log_ok "SSH- und Linux-Collections aktiv"
-				
-				# Zusätzlich prüfen ob Updates verfügbar sind
-				if cscli collections list 2>/dev/null | grep -q "tainted"; then
-					log_info "Hinweis: Collection-Updates verfügbar (cscli collections upgrade)"
-				fi
-			else
-				log_warn "Nicht alle Collections installiert - funktioniert trotzdem"
-			fi
-		else
-			log_warn "Collection-Installation fehlgeschlagen - CrowdSec funktioniert trotzdem"
+	log_info "  -> Prüfe CrowdSec Collections..."
+
+	# Erst prüfen ob bereits installiert
+	local already_installed
+	already_installed=$(cscli collections list 2>/dev/null | grep -E "crowdsecurity/(sshd|linux).*enabled" | wc -l || echo 0)
+
+	if [ "$already_installed" -ge 2 ]; then
+		log_ok "SSH- und Linux-Collections bereits aktiv"
+		
+		# Updates-Hinweis falls tainted
+		if cscli collections list 2>/dev/null | grep -q "tainted"; then
+			log_info "Hinweis: Collection-Updates verfügbar (cscli collections upgrade)"
 		fi
 	else
-		log_warn "Hub-Update fehlgeschlagen - überspringe Collection-Installation"
+		# Nur installieren wenn wirklich fehlend
+		if run_with_spinner "Aktualisiere Hub-Index..." "cscli hub update 2>/dev/null"; then
+			if run_with_spinner "Installiere fehlende Collections..." \
+			"cscli collections install crowdsecurity/sshd crowdsecurity/linux 2>/dev/null"; then
+				log_ok "Collections erfolgreich installiert"
+			else
+				log_warn "Collection-Installation fehlgeschlagen - CrowdSec funktioniert trotzdem"
+			fi
+		else
+			log_warn "Hub-Update fehlgeschlagen - überspringe Collection-Installation"
+		fi
 	fi
 
     # Finale Überprüfung der CrowdSec-Dienste
