@@ -222,6 +222,32 @@ load_modules() {
     log_debug "$count Setup-Module erfolgreich geladen."
 }
 
+##
+# Fehler-Handler für kritische Fehler während der Setup-Ausführung.
+# Führt bei Bedarf einen Rollback durch.
+# @param int $1 Exit-Code des fehlgeschlagenen Befehls.
+# @param int $2 Zeilennummer des fehlgeschlagenen Befehls.
+# @param string $3 Der fehlgeschlagene Befehl.
+##
+handle_error() {
+    local exit_code=$1
+    local line_number=$2 
+    local failed_command=$3
+    
+    # Nur bei kritischen System-Operationen Rollback
+    case "$failed_command" in
+        *"systemctl"*|*"apt"*|*"curl"*|*"wget"*|*"cp "*|*"mv "*|*"rm "*|*"mkdir"*)
+            log_error "Kritischer Systemfehler in Zeile $line_number: $failed_command"
+            rollback
+            ;;
+        *)
+            # Alle anderen Befehle ignorieren
+            log_debug "Nicht-kritischer Fehler ignoriert: $failed_command (Exit-Code: $exit_code)"
+            return 0
+            ;;
+    esac
+}
+
 # ═══════════════════════════════════════════════════════════════════════════
 # SETUP-AUSFÜHRUNG
 # ═══════════════════════════════════════════════════════════════════════════
@@ -353,7 +379,7 @@ main() {
     show_startup_header 
     
     # 7. Jetzt erst den echten Error-Handler setzen (rollback existiert jetzt)
-    trap 'rollback' ERR
+ 	trap 'handle_error $? $LINENO $BASH_COMMAND' ERR
     
     # 8. Begrüßung (nach Library-Load für erweiterte Funktionen)
     log_info "Starte Server-Baukasten v$SCRIPT_VERSION..."
