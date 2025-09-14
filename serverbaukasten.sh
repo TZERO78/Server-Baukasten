@@ -45,6 +45,77 @@ early_error_handler() {
     exit 1
 }
 
+##
+# Fehler-Handler für kritische Fehler während der Setup-Ausführung.
+# Führt bei Bedarf einen Rollback durch.
+# @param int $1 Exit-Code des fehlgeschlagenen Befehls.
+# @param int $2 Zeilennummer des fehlgeschlagenen Befehls.
+# @param string $3 Der fehlgeschlagene Befehl.
+##
+handle_error() {
+    local exit_code=$1
+    local line_number=$2 
+    local failed_command=$3
+    
+    # Permanente Debug-Ausgabe
+    echo "DEBUG: ERR-Trap ausgelöst!"
+    echo "  Exit-Code: $exit_code"
+    echo "  Zeile: $line_number"  
+    echo "  Befehl: '$failed_command'"
+    
+    case "$failed_command" in
+        *'(('*'))'*|*'$((*))'*)
+            log_debug "Harmlose arithmetische Operation ignoriert: $failed_command"
+            return 0
+            ;;
+        *"systemctl"*|*"apt"*|*"curl"*|*"wget"*|*"cp "*|*"mv "*|*"rm "*|*"mkdir"*)
+            log_error "Kritischer Systemfehler in Zeile $line_number: $failed_command"
+            rollback  # ✅ WIEDER HINZUGEFÜGT
+            ;;
+        *)
+            if [ $exit_code -gt 1 ]; then
+                log_error "Schwerwiegender Fehler in Zeile $line_number: $failed_command" 
+                rollback  # ✅ WIEDER HINZUGEFÜGT
+            else
+                log_debug "Exit-Code 1 ignoriert für: $failed_command"
+            fi
+            ;;
+    esac
+}
+
+##
+# Führt einen Setup-Schritt kontrolliert aus und prüft dessen Erfolg.
+# Sorgt für einheitliches Logging und löst bei Fehlern den globalen
+# Error-Handler kontrolliert aus.
+#
+# @param string $1 Name des Schritts (für das Logging)
+# @param string $@ Der auszuführende Befehl und seine Argumente
+##
+execute_step() {
+    local step_name="$1"
+    shift # Entfernt den Namen des Schritts aus der Argumentenliste
+    local command_to_run=("$@")
+
+    log_info "➡️  Schritt wird ausgeführt: ${BLUE}${step_name}${NC}"
+
+    # Wir führen den Befehl aus und fangen den Fehlerfall direkt ab.
+    # Das 'if' verhindert, dass 'set -e' das Skript sofort beendet.
+    if "${command_to_run[@]}"; then
+        log_ok "✅ Schritt erfolgreich abgeschlossen: ${step_name}"
+        echo # Eine Leerzeile für bessere Lesbarkeit
+        return 0
+    else
+        local exit_code=$?
+        # Wir geben eine klare, übergeordnete Fehlermeldung aus...
+        echo -e "\033[0;31m❌ Kritischer Fehler im Schritt: '${step_name}' (Exit-Code: $exit_code)\033[0m" >&2
+        
+        # ...und beenden das Skript dann mit einem Fehlercode.
+        # Dies löst unseren globalen 'trap' und die 'handle_error'-Funktion aus,
+        # die dann den Rollback durchführen kann.
+        exit 1
+    fi
+}
+
 # ═══════════════════════════════════════════════════════════════════════════
 # FRÜHE HELFER-FUNKTIONEN (vor Bibliotheks-Load)
 # ═══════════════════════════════════════════════════════════════════════════
@@ -222,127 +293,70 @@ load_modules() {
     log_debug "$count Setup-Module erfolgreich geladen."
 }
 
-##
-# Fehler-Handler für kritische Fehler während der Setup-Ausführung.
-# Führt bei Bedarf einen Rollback durch.
-# @param int $1 Exit-Code des fehlgeschlagenen Befehls.
-# @param int $2 Zeilennummer des fehlgeschlagenen Befehls.
-# @param string $3 Der fehlgeschlagene Befehl.
-##
-handle_error() {
-    local exit_code=$1
-    local line_number=$2 
-    local failed_command=$3
-    
-    # Permanente Debug-Ausgabe
-    echo "DEBUG: ERR-Trap ausgelöst!"
-    echo "  Exit-Code: $exit_code"
-    echo "  Zeile: $line_number"  
-    echo "  Befehl: '$failed_command'"
-    
-    case "$failed_command" in
-        *'(('*'))'*|*'$((*))'*)
-            log_debug "Harmlose arithmetische Operation ignoriert: $failed_command"
-            return 0
-            ;;
-        *"systemctl"*|*"apt"*|*"curl"*|*"wget"*|*"cp "*|*"mv "*|*"rm "*|*"mkdir"*)
-            log_error "Kritischer Systemfehler in Zeile $line_number: $failed_command"
-            rollback  # ✅ WIEDER HINZUGEFÜGT
-            ;;
-        *)
-            if [ $exit_code -gt 1 ]; then
-                log_error "Schwerwiegender Fehler in Zeile $line_number: $failed_command" 
-                rollback  # ✅ WIEDER HINZUGEFÜGT
-            else
-                log_debug "Exit-Code 1 ignoriert für: $failed_command"
-            fi
-            ;;
-    esac
-}
+
 
 # ═══════════════════════════════════════════════════════════════════════════
 # SETUP-AUSFÜHRUNG
 # ═══════════════════════════════════════════════════════════════════════════
 
 ##
-# Führt die einzelnen Setup-Module in der korrekten Reihenfolge aus.
-# KORRIGIERT v4.3: Zweistufiges Firewall-Setup für NFTables/Docker/CrowdSec-Kompatibilität
-# @param bool $1 Test-Modus (true/false).
+# Führt die einzelnen Setup-Module in einer kontrollierten Reihenfolge aus.
+# Jeder Schritt wird einzeln überwacht und sein Erfolg protokolliert.
 ##
 run_setup() {
-    #TEST_MODE="$1"
     
     # ═══════════════════════════════════════════════════════════════════════════
     # PHASE 1: VORBEREITUNG & SYSTEM-GRUNDLAGEN
     # ═══════════════════════════════════════════════════════════════════════════
     log_info "Phase 1/5: Vorbereitung & System-Grundlagen..."
     
-    module_prepare_install
-    load_config_from_file "$CONFIG_FILE"
-    
-    # Interface-Detection NACH Config-Load (für NAT-Regeln später)
-    detect_primary_interface_if_needed
-    
-    # Systembereinigung für sauberen Ausgangszustand
-    module_cleanup
+    execute_step "System für Installation vorbereiten" module_prepare_install
+    execute_step "Konfigurationsdatei laden" load_config_from_file "$CONFIG_FILE"
+    execute_step "Primäres Netzwerk-Interface ermitteln" detect_primary_interface_if_needed
+    execute_step "Initiales System bereinigen" module_cleanup
 
     # ═══════════════════════════════════════════════════════════════════════════
     # PHASE 2: SYSTEM-FUNDAMENT (OS, Pakete, Kernel)
     # ═══════════════════════════════════════════════════════════════════════════
     log_info "Phase 2/5: System-Fundament (OS, Pakete, Kernel)..."
     
-    detect_os
-    module_base
-	module_install_services
-    module_system_update "$TEST_MODE"
-    
-    # WICHTIG: Kernel-Härtung VOR Firewall (IP-Forwarding für Docker/VPN)
-    module_kernel_hardening
+    execute_step "Betriebssystem erkennen" detect_os
+    execute_step "Basissystem einrichten" module_base
+    execute_step "Benötigte Dienste installieren" module_install_services
+    execute_step "System-Updates durchführen" module_system_update "$TEST_MODE"
+    execute_step "Kernel-Härtung anwenden" module_kernel_hardening
 
     # ═══════════════════════════════════════════════════════════════════════════
     # PHASE 3: BASIS-SICHERHEIT (Firewall + IPS + Monitoring)
     # ═══════════════════════════════════════════════════════════════════════════
     log_info "Phase 3/5: Basis-Sicherheit (SSH, BASIS-Firewall, CrowdSec)..."
     
-    # KORRIGIERT: module_security macht jetzt ALLES auf einmal:
-    # - SSH-Härtung & AppArmor
-    # - iptables-nft Backend
-    # - BASIS-Firewall (ohne VPN/Docker)
-    # - CrowdSec IPS
-    # - AIDE & RKHunter (falls nicht Test-Modus)
-    module_security "$TEST_MODE"
-    # GeoIP-Blocking-System konfigurieren (falls aktiviert)
-    module_geoip
+    execute_step "Basis-Sicherheit anwenden (SSH, Firewall, IPS)" module_security "$TEST_MODE"
+    execute_step "GeoIP-Blocking-System konfigurieren" module_geoip
+    
     # ═══════════════════════════════════════════════════════════════════════════
     # PHASE 4: DIENSTE & DYNAMISCHE FIREWALL-ERWEITERUNG
     # ═══════════════════════════════════════════════════════════════════════════
     log_info "Phase 4/5: Dienste installieren & Firewall dynamisch erweitern..."
     
-
     # STUFE 1: Netzwerk-Dienste (VPN, Tailscale, Dynamic DNS)
-    module_network "$TEST_MODE"
+    execute_step "Netzwerk-Dienste (VPN, etc.) einrichten" module_network "$TEST_MODE"
     
     # STUFE 2: Container-Dienste (Docker Engine + Management)
     if [ "${SERVER_ROLE:-2}" = "1" ]; then
-        module_container
-        module_deploy_containers
+        execute_step "Container-Engine (Docker) installieren" module_container
+        execute_step "Management-Container (Portainer, Watchtower) bereitstellen" module_deploy_containers
     fi
     
-
     # ═══════════════════════════════════════════════════════════════════════════
     # PHASE 5: ABSCHLUSS & FINALISIERUNG
     # ═══════════════════════════════════════════════════════════════════════════
     log_info "Phase 5/5: Abschluss-Arbeiten (Mail, Logs, Verifikation)..."
     
-    # System-Services (Mail, Logging)
-    module_mail_setup
-    module_journald_optimization
-    
-    # Finale Verifikation aller Komponenten
-    module_verify_setup
-    
-    # Sicherheits-Cleanup (sudo-Rechte normalisieren)
-    cleanup_admin_sudo_rights
+    execute_step "System-Mail (msmtp) einrichten" module_mail_setup
+    execute_step "System-Protokoll (journald) optimieren" module_journald_optimization
+    execute_step "Finale Verifikation aller Komponenten" module_verify_setup
+    execute_step "Admin-Rechte normalisieren" cleanup_admin_sudo_rights
 }
 
 ##
