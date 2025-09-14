@@ -5,11 +5,26 @@ Alle wesentlichen Änderungen an diesem Projekt werden in dieser Datei dokumenti
 Das Format basiert auf [Keep a Changelog](https://keepachangelog.com/de/1.0.0/),
 und dieses Projekt folgt [Semantic Versioning](https://semver.org/lang/de/).
 
-## [Unreleased]
+## [5.3] - 2025-09-14
 
-### Geplant
-- Vollständige Idempotenz für wiederholbare Ausführungen (insbesondere Überarbeitung von `module_cleanup`)
-- Unterstützung für Ubuntu 22.04/24.04
+### ✨ Hinzugefügt (Added)
+- **Kontrollierte Ausführung:** Eine neue `execute_step`-Engine im Hauptskript steuert und protokolliert jeden einzelnen Setup-Schritt.
+- **Idempotentes Design:** Einführung von `idempotent_helpers`, damit das Skript sicher mehrfach ausgeführt werden kann.
+- **Modulare Blaupause:** Eine neue `module_base.sh` dient als standardisierte Vorlage für alle Module.
+- **Sichere Konfigurations-Verwaltung:** `config_helpers.sh` für robustes und sicheres Lesen von Konfigurationsdateien.
+- **Selbstheilungs-Mechanismen:** `apt_repairs_helper.sh` erkennt und behebt häufige `apt`-Probleme automatisch.
+- **Professionelles Error-Handling:** Ein globaler `trap`-Mechanismus mit intelligenter Fehlerbewertung und Rollback-Fähigkeit.
+- **Finale Selbst-Verifikation:** Ein `module_verify` prüft am Ende des Setups die korrekte Installation und Integration aller Komponenten.
+
+### ♻️ Geändert (Changed)
+- **Architektur-Refactoring:** Komplette Umstellung von einem einzelnen Skript auf ein modulares Framework (`/lib`, `/modules`).
+- **Rolle des Hauptskripts:** `serverbaukasten.sh` agiert nun als zentraler "Dirigent", der nur noch den Ablauf steuert.
+
+### 🐛 Behoben (Fixed)
+- Zahlreiche kleinere Bugfixes und Stabilitätsverbesserungen im gesamten Skript zur Erhöhung der Robustheit.
+
+### 🧪 Getestet (Tested)
+- **Debian 13 (Trixie):** Die vollständige Funktionalität wurde auf einem VPS mit dem kommenden Debian 13 erfolgreich verifiziert. Das Skript ist damit zukunftssicher für das nächste Debian-Release.
 
 ## [5.2.1] - 2025-09-12
 
