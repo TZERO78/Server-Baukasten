@@ -321,13 +321,13 @@ verify_base_firewall_architecture() {
 }
 
 ##
-# VERBESSERTE VERSION: Verifikation der dynamischen Firewall-Erweiterungen
+# KORRIGIERTE VERSION: Verifikation der dynamischen Firewall-Erweiterungen
 ##
 verify_dynamic_firewall_extensions() {
     log_info "    -> Prüfe dynamische Firewall-Erweiterungen..."
     local extension_issues=0
     
-    # 1. Tailscale-Integration (falls VPN-Modell) - VERBESSERT
+    # 1. Tailscale-Integration (falls VPN-Modell) - KORRIGIERT
     if [ "${ACCESS_MODEL:-2}" = "1" ]; then
         log_info "      -> VPN-Modell konfiguriert: Prüfe Tailscale-Integration..."
         
@@ -340,11 +340,11 @@ verify_dynamic_firewall_extensions() {
                 log_ok "        ✅ Tailscale-NAT-Regeln aktiv"
             else
                 log_warn "        ⚠️ Tailscale-NAT-Regeln fehlen"
-                extension_issues=$((extension_issues + 1))  # KORRIGIERT: Einheitliche Syntax
+                extension_issues=$((extension_issues + 1))
             fi
         else
             log_error "        ❌ Tailscale-Firewall-Regeln fehlen!"
-            ((extension_issues++))  # KORRIGIERT: Keine Subshell mehr
+            extension_issues=$((extension_issues + 1))  # KORRIGIERT: Einheitlich
         fi
         
         # Prüfe Tailscale-Verbindung (verbesserte Logik)
@@ -355,17 +355,17 @@ verify_dynamic_firewall_extensions() {
                 log_ok "        ✅ Tailscale VPN ist verbunden"
             else
                 log_warn "        ⚠️ Tailscale VPN nicht verbunden"
-                ((extension_issues++))  # KORRIGIERT: Einheitlich
+                extension_issues=$((extension_issues + 1))
             fi
         else
             log_warn "        ⚠️ Tailscale-CLI nicht installiert"
-            ((extension_issues++))
+            extension_issues=$((extension_issues + 1))
         fi
     else
         log_info "      -> Öffentliches Modell: Tailscale-Integration nicht erforderlich"
     fi
     
-    # 2. Docker-Integration (falls Container-Host) - VERBESSERT
+    # 2. Docker-Integration (falls Container-Host) - KORRIGIERT
     if [ "${SERVER_ROLE:-2}" = "1" ]; then
         log_info "      -> Container-Host konfiguriert: Prüfe Docker-Integration..."
         
@@ -375,7 +375,7 @@ verify_dynamic_firewall_extensions() {
                 log_ok "        ✅ Docker-Firewall-Integration aktiv"
             else
                 log_warn "        ⚠️ Docker-Firewall-Regeln nicht sichtbar"
-                ((extension_issues++))
+                extension_issues=$((extension_issues + 1))
             fi
             
             # Prüfe Docker-Bridge
@@ -383,7 +383,7 @@ verify_dynamic_firewall_extensions() {
                 log_ok "        ✅ Docker-Bridge (docker0) aktiv"
             else
                 log_error "        ❌ Docker-Bridge fehlt!"
-                ((extension_issues++))
+                extension_issues=$((extension_issues + 1))
             fi
             
             # VERBESSERTE Docker-Netzwerk-Prüfung
@@ -394,21 +394,21 @@ verify_dynamic_firewall_extensions() {
                     log_ok "        ✅ Docker-Netzwerk: $docker_subnet"
                 else
                     log_warn "        ⚠️ Docker-Netzwerk-Info nicht verfügbar"
-                    ((extension_issues++))
+                    extension_issues=$((extension_issues + 1))
                 fi
             else
                 log_error "        ❌ Docker-CLI nicht verfügbar"
-                ((extension_issues++))
+                extension_issues=$((extension_issues + 1))
             fi
         else
             log_error "        ❌ Docker-Service ist nicht aktiv"
-            ((extension_issues++))
+            extension_issues=$((extension_issues + 1))
         fi
     else
         log_info "      -> Einfacher Server: Docker-Integration nicht erforderlich"
     fi
     
-    # 3. CrowdSec-Integration - VERBESSERT
+    # 3. CrowdSec-Integration - KORRIGIERT
     if command -v crowdsec >/dev/null 2>&1; then
         log_info "      -> CrowdSec installiert: Prüfe Firewall-Integration..."
         
@@ -419,7 +419,7 @@ verify_dynamic_firewall_extensions() {
             log_ok "        ✅ CrowdSec-Firewall-Tabellen aktiv ($crowdsec_tables gefunden)"
         else
             log_warn "        ⚠️ CrowdSec-Firewall-Tabellen nicht gefunden"
-            ((extension_issues++))
+            extension_issues=$((extension_issues + 1))
         fi
         
         # Prüfe verschiedene CrowdSec-Bouncer
@@ -434,13 +434,13 @@ verify_dynamic_firewall_extensions() {
         
         if [ "$bouncer_active" = false ]; then
             log_warn "        ⚠️ Kein CrowdSec-Bouncer aktiv"
-            ((extension_issues++))
+            extension_issues=$((extension_issues + 1))
         fi
         
         # BONUS: Prüfe CrowdSec-Service selbst
         if ! systemctl is-active --quiet crowdsec 2>/dev/null; then
             log_error "        ❌ CrowdSec-Service nicht aktiv"
-            ((extension_issues++))
+            extension_issues=$((extension_issues + 1))
         fi
     fi
     
