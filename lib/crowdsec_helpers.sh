@@ -284,10 +284,33 @@ EOF
 tune_crowdsec_ssh_policy() {
   local bantime="${CROWDSEC_BANTIME:-4h}"
   log_info "  -> Passe CrowdSec SSH-Policy an (Ban-Dauer: ${bantime})..."
+
+  # Standard? Dann nix tun.
   [ "$bantime" = "4h" ] && { log_info "Standard 4h – nichts zu tun."; return 0; }
 
-  install -d -m0755 /etc/crowdsec/profiles.d/
-  cat > /etc/crowdsec/profiles.d/99-custom-ssh-duration.yaml <<EOF
+  # (Optional) simples Format-Guarding – anpassen, falls du andere Units zulassen willst
+  if ! [[ "$bantime" =~ ^[0-9]+(s|m|h|d|w)$ ]]; then
+    log_error "Ungültiges Ban-Dauer-Format: '$bantime' (erwartet z.B. 30m, 4h, 1d, 1w)"
+    return 1
+  fi
+
+  # Root benötigt
+  if [ "$(id -u)" -ne 0 ]; then
+    log_error "SSH-Policy-Tuning benötigt root-Rechte."
+    return 1
+  fi
+
+  # Zielpfad
+  local dir="/etc/crowdsec/profiles.d"
+  local dst="$dir/99-custom-ssh-duration.yaml"
+
+  # Verzeichnis anlegen (fail-fast, damit set -e gewollt greift)
+  install -o root -g root -m0755 -d "$dir"
+
+  # Atomar schreiben: erst tmp, dann mit korrekten Rechten "install"-kopieren
+  local tmp
+  tmp="$(mktemp)" || { log_error "mktemp fehlgeschlagen"; return 1; }
+  cat >"$tmp" <<EOF
 name: custom_ssh_ban_duration
 description: "Override default ssh ban duration"
 filters:
@@ -297,9 +320,16 @@ decisions:
     duration: "${bantime}"
 on_success: break
 EOF
-  chmod 0640 /etc/crowdsec/profiles.d/99-custom-ssh-duration.yaml 2>/dev/null || true
-  log_ok "Custom SSH-Profile mit Ban-Dauer '${bantime}' erstellt"
+
+  install -o root -g root -m0640 "$tmp" "$dst"
+  rm -f "$tmp"
+
+  log_ok "Custom SSH-Profile mit Ban-Dauer '${bantime}' erstellt: $dst"
+
+  # CrowdSec neu laden, damit das Profil greift
+  systemctl reload crowdsec 2>/dev/null || systemctl restart crowdsec
 }
+
 
 ## Komplett-Stack (Agent + Bouncer)
 install_crowdsec_stack() {
