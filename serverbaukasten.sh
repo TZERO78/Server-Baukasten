@@ -32,6 +32,7 @@ declare -g SCRIPT_VERBOSE=false
 declare -g DEBUG=false
 declare -g TEST_MODE=false
 declare -g CONFIG_FILE=""
+declare -g LOG_FILE="/var/log/server-baukasten.log"
 declare -a BACKUP_FILES
 declare -g PRIMARY_INTERFACE=""
 declare -g TAILSCALE_INTERFACE=""
