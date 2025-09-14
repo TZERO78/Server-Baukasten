@@ -18,7 +18,7 @@ SCRIPT_DIR="$(cd -- "$(dirname "${BASH_SOURCE[0]}")" && cd .. && pwd -P)"
 # ════════════════════════════════════════════════════════════════
 # SCRIPT-INFORMATIONEN
 # ════════════════════════════════════════════════════════════════
-readonly SCRIPT_VERSION="5.2.1"
+readonly SCRIPT_VERSION="5.3.0"
 readonly SCRIPT_NAME="Server-Baukasten"
 readonly SCRIPT_AUTHOR="Markus F. (TZERO78)"
 
