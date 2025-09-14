@@ -86,10 +86,25 @@ setup_basic_security() {
     # --- AppArmor ---
     log_info "  -> Aktiviere AppArmor (Mandatory Access Control)..."
     run_with_spinner "AppArmor-Dienst aktivieren..." "systemctl enable --now apparmor"
-    run_with_spinner "AppArmor-Profile in enforce-Modus setzen..." "aa-enforce /etc/apparmor.d/* 2>/dev/null || true"
-    log_ok "AppArmor aktiviert und Profile erzwungen."
     
-    log_ok "Basis-Sicherheit erfolgreich konfiguriert."
+    # AppArmor-Profile selektiv erzwingen (runc ausschließen für Docker-Kompatibilität)
+    log_info "  -> Setze AppArmor-Profile in enforce-Modus (außer runc)..."
+    for profile in /etc/apparmor.d/*; do
+        basename_profile=$(basename "$profile")
+        case "$basename_profile" in
+            "runc"|".*"|"local"|"tunables"|"cache")
+                log_debug "Überspringe AppArmor-Profil: $basename_profile"
+                continue
+                ;;
+            *)
+                if [ -f "$profile" ]; then
+                    aa-enforce "$profile" 2>/dev/null || log_debug "Konnte Profil nicht erzwingen: $basename_profile"
+                fi
+                ;;
+        esac
+    done
+    
+    log_ok "AppArmor aktiviert und Profile erzwungen (runc ausgenommen für Docker)."
 }
 
 ##
