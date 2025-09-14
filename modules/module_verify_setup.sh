@@ -321,17 +321,17 @@ verify_base_firewall_architecture() {
 }
 
 ##
-# KORRIGIERTE VERSION: Verifikation der dynamischen Firewall-Erweiterungen
+# VERBESSERTE VERSION: Verifikation der dynamischen Firewall-Erweiterungen
 ##
 verify_dynamic_firewall_extensions() {
     log_info "    -> Prüfe dynamische Firewall-Erweiterungen..."
     local extension_issues=0
     
-    # 1. Tailscale-Integration (falls VPN-Modell) - KORRIGIERT
+    # 1. Tailscale-Integration (falls VPN-Modell) - VERBESSERT
     if [ "${ACCESS_MODEL:-2}" = "1" ]; then
         log_info "      -> VPN-Modell konfiguriert: Prüfe Tailscale-Integration..."
         
-        # KORRIGIERT: Direkte Suche nach tailscale0 statt leerer Variable
+        # Prüfe Tailscale-Firewall-Regeln
         if nft list ruleset 2>/dev/null | grep -q "tailscale0"; then
             log_ok "        ✅ Tailscale-Firewall-Integration aktiv"
             
@@ -340,31 +340,36 @@ verify_dynamic_firewall_extensions() {
                 log_ok "        ✅ Tailscale-NAT-Regeln aktiv"
             else
                 log_warn "        ⚠️ Tailscale-NAT-Regeln fehlen"
-                ((extension_issues++))
+                extension_issues=$((extension_issues + 1))  # KORRIGIERT: Einheitliche Syntax
             fi
         else
             log_error "        ❌ Tailscale-Firewall-Regeln fehlen!"
-            ((extension_issues++))
+            ((extension_issues++))  # KORRIGIERT: Keine Subshell mehr
         fi
         
-        # Prüfe auch ob Tailscale tatsächlich verbunden ist
+        # Prüfe Tailscale-Verbindung (verbesserte Logik)
         if command -v tailscale >/dev/null 2>&1; then
-            if tailscale status >/dev/null 2>&1 && ! tailscale status 2>/dev/null | grep -q "Logged out"; then
+            local ts_status
+            ts_status=$(tailscale status 2>/dev/null)
+            if [ $? -eq 0 ] && ! echo "$ts_status" | grep -q "Logged out"; then
                 log_ok "        ✅ Tailscale VPN ist verbunden"
             else
                 log_warn "        ⚠️ Tailscale VPN nicht verbunden"
-                ((extension_issues++))
+                ((extension_issues++))  # KORRIGIERT: Einheitlich
             fi
+        else
+            log_warn "        ⚠️ Tailscale-CLI nicht installiert"
+            ((extension_issues++))
         fi
     else
         log_info "      -> Öffentliches Modell: Tailscale-Integration nicht erforderlich"
     fi
     
-    # 2. Docker-Integration (falls Container-Host)
+    # 2. Docker-Integration (falls Container-Host) - VERBESSERT
     if [ "${SERVER_ROLE:-2}" = "1" ]; then
         log_info "      -> Container-Host konfiguriert: Prüfe Docker-Integration..."
         
-        if systemctl is-active --quiet docker; then
+        if systemctl is-active --quiet docker 2>/dev/null; then
             # Prüfe Docker-Firewall-Integration
             if nft list ruleset 2>/dev/null | grep -q "docker"; then
                 log_ok "        ✅ Docker-Firewall-Integration aktiv"
@@ -381,13 +386,19 @@ verify_dynamic_firewall_extensions() {
                 ((extension_issues++))
             fi
             
-            # Prüfe Container-Netzwerk
+            # VERBESSERTE Docker-Netzwerk-Prüfung
             local docker_subnet
-            docker_subnet=$(docker network inspect bridge --format '{{range .IPAM.Config}}{{.Subnet}}{{end}}' 2>/dev/null || echo "")
-            if [ -n "$docker_subnet" ]; then
-                log_ok "        ✅ Docker-Netzwerk: $docker_subnet"
+            if command -v docker >/dev/null 2>&1; then
+                docker_subnet=$(docker network inspect bridge --format '{{range .IPAM.Config}}{{.Subnet}}{{end}}' 2>/dev/null)
+                if [ -n "$docker_subnet" ] && [ "$docker_subnet" != "<no value>" ]; then
+                    log_ok "        ✅ Docker-Netzwerk: $docker_subnet"
+                else
+                    log_warn "        ⚠️ Docker-Netzwerk-Info nicht verfügbar"
+                    ((extension_issues++))
+                fi
             else
-                log_warn "        ⚠️ Docker-Netzwerk-Info nicht verfügbar"
+                log_error "        ❌ Docker-CLI nicht verfügbar"
+                ((extension_issues++))
             fi
         else
             log_error "        ❌ Docker-Service ist nicht aktiv"
@@ -397,23 +408,47 @@ verify_dynamic_firewall_extensions() {
         log_info "      -> Einfacher Server: Docker-Integration nicht erforderlich"
     fi
     
-    # 3. CrowdSec-Integration  
+    # 3. CrowdSec-Integration - VERBESSERT
     if command -v crowdsec >/dev/null 2>&1; then
         log_info "      -> CrowdSec installiert: Prüfe Firewall-Integration..."
         
-        if nft list tables 2>/dev/null | grep -qE "(crowdsec|crowdsec6)"; then
-            log_ok "        ✅ CrowdSec-Firewall-Tabellen aktiv"
+        # Prüfe CrowdSec-Tabellen (robuster)
+        local crowdsec_tables
+        crowdsec_tables=$(nft list tables 2>/dev/null | grep -E "(crowdsec|crowdsec6)" | wc -l)
+        if [ "$crowdsec_tables" -gt 0 ]; then
+            log_ok "        ✅ CrowdSec-Firewall-Tabellen aktiv ($crowdsec_tables gefunden)"
         else
             log_warn "        ⚠️ CrowdSec-Firewall-Tabellen nicht gefunden"
             ((extension_issues++))
         fi
         
-        if systemctl is-active --quiet crowdsec-bouncer-setonly; then
-            log_ok "        ✅ CrowdSec-Bouncer aktiv"
-        else
-            log_warn "        ⚠️ CrowdSec-Bouncer nicht aktiv"
+        # Prüfe verschiedene CrowdSec-Bouncer
+        local bouncer_active=false
+        for bouncer in crowdsec-bouncer-setonly crowdsec-firewall-bouncer; do
+            if systemctl is-active --quiet "$bouncer" 2>/dev/null; then
+                log_ok "        ✅ $bouncer aktiv"
+                bouncer_active=true
+                break
+            fi
+        done
+        
+        if [ "$bouncer_active" = false ]; then
+            log_warn "        ⚠️ Kein CrowdSec-Bouncer aktiv"
             ((extension_issues++))
         fi
+        
+        # BONUS: Prüfe CrowdSec-Service selbst
+        if ! systemctl is-active --quiet crowdsec 2>/dev/null; then
+            log_error "        ❌ CrowdSec-Service nicht aktiv"
+            ((extension_issues++))
+        fi
+    fi
+    
+    # BONUS: Zusammenfassung der gefundenen Probleme
+    if [ $extension_issues -eq 0 ]; then
+        log_ok "    -> Alle dynamischen Firewall-Erweiterungen funktionieren korrekt"
+    else
+        log_warn "    -> $extension_issues Problem(e) bei dynamischen Firewall-Erweiterungen gefunden"
     fi
     
     return $extension_issues
