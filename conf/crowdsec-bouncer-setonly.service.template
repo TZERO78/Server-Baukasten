@@ -3,7 +3,7 @@ Description=CrowdSec Firewall Bouncer (Set-Only Mode) - Server-Baukasten
 Documentation=https://docs.crowdsec.net/docs/bouncers/firewall/
 After=multi-user.target crowdsec.service nftables.service
 Wants=crowdsec.service nftables.service
-ConditionPathExists=$config_file
+ConditionPathExists=/etc/crowdsec/bouncers/crowdsec-firewall-bouncer.yaml.local
 
 [Service]
 Type=simple
@@ -14,10 +14,10 @@ Group=root
 ExecStartPre=/bin/bash -c 'until cscli metrics >/dev/null 2>&1; do sleep 2; done'
 
 # KORRIGIERT: Konfiguration testen
-ExecStartPre=/usr/bin/crowdsec-firewall-bouncer -c $config_file -t
+ExecStartPre=/usr/bin/crowdsec-firewall-bouncer -c /etc/crowdsec/bouncers/crowdsec-firewall-bouncer.yaml.local -t
 
 # Haupt-Service starten  
-ExecStart=/usr/bin/crowdsec-firewall-bouncer -c $config_file
+ExecStart=/usr/bin/crowdsec-firewall-bouncer -c /etc/crowdsec/bouncers/crowdsec-firewall-bouncer.yaml.local
 
 # Robuster Restart bei Problemen
 Restart=on-failure
