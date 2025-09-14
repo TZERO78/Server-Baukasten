@@ -4,7 +4,7 @@
 # @description:
 #   - Installiert Standard-Tools (Core/Admin) sowie optionale Security/Apps
 #   - yq (Go-Version) nur bei Bedarf und mit Version-Check
-#   - msmtp-Konfiguration nur bei gültigen SMTP-Variablen
+#   - msmtp Installation (Konfiguration erfolgt in module_mail)
 # @license: MIT
 ################################################################################
 
@@ -82,66 +82,20 @@ module_install_services() {
     log_debug "yq bereits ok: $(yq --version 2>/dev/null || echo '?')"
   fi
 
-  # 5) Mail (msmtp) – nur wenn gewünscht, installiert und Variablen valide
+  # 5) Mail (msmtp) – nur Installation, Konfiguration erfolgt in module_mail
   if [ "${ENABLE_SYSTEM_MAIL:-nein}" = "ja" ]; then
-    if dpkg -s msmtp >/dev/null 2>&1; then
-      # Minimalprüfung: ohne HOST kein Sinn – überspringen statt Fehler
-      if [ -z "${SMTP_HOST:-}" ]; then
-        log_warn "SMTP_HOST nicht gesetzt – überspringe Mail-Konfiguration."
-      else
-        # Wenn AUTH=ja, müssen USER/PASSWORD da sein
-        local need_auth="nein"
-        [ "${SMTP_AUTH:-ja}" = "ja" ] && need_auth="ja"
-        if [ "$need_auth" = "ja" ] && { [ -z "${SMTP_USER:-}" ] || [ -z "${SMTP_PASSWORD:-}" ]; }; then
-          log_warn "SMTP_AUTH=ja aber SMTP_USER/PASSWORD fehlen – überspringe Mail-Konfiguration."
-        else
-          log_debug "msmtp-Setup: host=${SMTP_HOST} port=${SMTP_PORT:-25} auth=${SMTP_AUTH:-ja} starttls=${SMTP_TLS_STARTTLS:-ja}"
-
-          update-alternatives --install /usr/sbin/sendmail sendmail /usr/bin/msmtp 25
-          update-alternatives --set sendmail /usr/bin/msmtp
-
-          # ja/nein → on/off
-          local tls_onoff="on"
-          [ "${SMTP_TLS_STARTTLS:-ja}" = "nein" ] && tls_onoff="off"
-          local auth_onoff="on"
-          [ "${SMTP_AUTH:-ja}" = "nein" ] && auth_onoff="off"
-
-          # Idempotent schreiben (mit ensure_* falls vorhanden)
-          if type -t ensure_file >/dev/null 2>&1; then
-            ensure_file "/etc/msmtprc" 0600 "root:root"
-          else
-            install -m 0600 -o root -g root /dev/null /etc/msmtprc
-          fi
-
-          cat >/etc/msmtprc <<EOF
-defaults
-auth           ${auth_onoff}
-tls            ${tls_onoff}
-tls_starttls   ${tls_onoff}
-tls_trust_file /etc/ssl/certs/ca-certificates.crt
-logfile        /var/log/msmtp.log
-
-account        default
-host           ${SMTP_HOST}
-port           ${SMTP_PORT:-25}
-from           ${SMTP_FROM:-root@$(hostname -f 2>/dev/null || hostname)}
-$( [ "$auth_onoff" = "on" ] && printf 'user           %s\npassword       %s\n' "${SMTP_USER:-}" "${SMTP_PASSWORD:-}" )
-EOF
-
-          if type -t ensure_mode_owner >/dev/null 2>&1; then
-            ensure_mode_owner "/etc/msmtprc" 0600 "root:root"
-          else
-            chmod 600 /etc/msmtprc; chown root:root /etc/msmtprc
-          fi
-
-          log_ok "msmtp als sendmail konfiguriert."
-        fi
-      fi
+    log_info "  -> Installiere msmtp (Konfiguration erfolgt später)..."
+    
+    # msmtp installieren falls nicht vorhanden
+    if ! dpkg -s msmtp >/dev/null 2>&1; then
+      run_with_spinner "Installiere msmtp" "apt-get install -y msmtp msmtp-mta" \
+        && log_ok "msmtp erfolgreich installiert." \
+        || { log_error "msmtp-Installation fehlgeschlagen."; return 1; }
     else
-      log_warn "msmtp nicht installiert – Mail-Konfiguration übersprungen."
+      log_debug "msmtp bereits installiert."
     fi
   else
-    log_debug "ENABLE_SYSTEM_MAIL!=ja – msmtp-Konfiguration übersprungen."
+    log_debug "ENABLE_SYSTEM_MAIL!=ja – msmtp-Installation übersprungen."
   fi
 
   log_ok "Modul Install-Services erfolgreich abgeschlossen."
