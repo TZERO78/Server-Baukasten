@@ -12,7 +12,8 @@ if ! command -v log_debug >/dev/null 2>&1; then
 fi
 
 # --- Script-/Projektpfade robust aus Skriptstandort ableiten ---
-SCRIPT_DIR="$(cd -- "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+# Ermittle das Hauptprojekt-Verzeichnis (eine Ebene über lib/)
+SCRIPT_DIR="$(cd -- "$(dirname "${BASH_SOURCE[0]}")" && cd .. && pwd -P)"
 
 # ════════════════════════════════════════════════════════════════
 # SCRIPT-INFORMATIONEN
