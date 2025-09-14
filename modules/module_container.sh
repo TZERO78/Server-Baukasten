@@ -203,12 +203,13 @@ EOF
     local max_wait=30
     local docker_interface=""
     
-    # Debug-Modus aktivieren für Problemanalyse
+    # ERR-Trap temporär deaktivieren für arithmetische Operationen
+    set +e
     set -x
     
     while [ $wait_time -lt $max_wait ]; do
         sleep 1
-        ((wait_time++))
+        wait_time=$((wait_time + 1))  # Sichere arithmetische Operation
         
         # Prüfe ob Docker-Socket verfügbar ist
         if docker info >/dev/null 2>&1; then
@@ -217,6 +218,7 @@ EOF
             
             if [ -n "$docker_interface" ]; then
                 set +x
+                set -e  # ERR-Trap wieder aktivieren
                 log_ok "Docker erfolgreich initialisiert (Interface: $docker_interface)"
                 break
             fi
@@ -229,6 +231,7 @@ EOF
     done
     
     set +x
+    set -e  # ERR-Trap wieder aktivieren
     
     # Validierung der Docker-Initialisierung
     if [ -z "$docker_interface" ] || ! docker info >/dev/null 2>&1; then
