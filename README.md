@@ -1,9 +1,10 @@
-# Server-Baukasten 🏗️
+# 🏗️ Server-Baukasten v5.3
 
-[![Version](https://img.shields.io/badge/Version-5.2.0-blue)](https://github.com/TZERO78/Server-Baukasten)
-[![License](https://img.shields.io/badge/License-MIT-green)](LICENSE)
-[![Debian](https://img.shields.io/badge/Debian-12-red)](https://www.debian.org/)
-[![Status](https://img.shields.io/badge/Status-Active-success)](https://github.com/TZERO78/Server-Baukasten)
+[![Version](https://img.shields.io/badge/Version-5.3-blue.svg)](https://github.com/TZERO78/Server-Baukasten/releases)
+[![Lizenz](https://img.shields.io/badge/Lizenz-MIT-green.svg)](https://opensource.org/licenses/MIT)
+[![Debian-Version](https://img.shields.io/badge/Getestet_auf-Debian_12_|_13-orange.svg)](#)
+
+Vollautomatische Härtung und Konfiguration für Debian- und Ubuntu-Server nach modernen, praxiserprobten Sicherheitsstandards. **Erfolgreich auf Debian 12 (Bookworm) und dem kommenden Debian 13 (Trixie) getestet.**
 
 **Modulares Server-Hardening für Linux mit NFTables, CrowdSec, GeoIP-Blocking und Docker-Integration.**
 
@@ -86,12 +87,9 @@ Automatisierte Einrichtung eines sicheren, produktionsbereiten Linux-Servers mit
 - **Watchtower** für automatische Container-Updates
 - **Tailscale VPN** Integration
 
-## 🆕 Neu in Version 5.2
+## Aktuelle Änderungen & Versionshistorie
 
-- **Automatische VPS-Provider-Erkennung** (getestet mit IONOS)
-- **APT-Quellen-Reparatur** bei defekten Installationen
-- **Windows-Zeilenumbruch-Bereinigung** (CRLF→LF) für Config-Dateien
-- **Verbesserte Fehlerbehandlung** mit Retry-Logik
+Alle detaillierten Änderungen, neuen Features und Bugfixes für jede Version werden sorgfältig im
 
 [Vollständige Änderungen](CHANGELOG.md)
 
