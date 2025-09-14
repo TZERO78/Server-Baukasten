@@ -136,8 +136,7 @@ install_crowdsec() {
   setup_crowdsec_repository || return 1
   install_crowdsec_packages crowdsec || return 1
 
-  ensure_crowdsec_hub_perms
-  
+    
   log_info "  -> Konfiguriere systemd-Service..."
   mkdir -p /etc/systemd/system/crowdsec.service.d
   cat > /etc/systemd/system/crowdsec.service.d/override.conf <<'EOF'

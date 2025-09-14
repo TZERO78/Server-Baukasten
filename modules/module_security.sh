@@ -204,36 +204,48 @@ setup_firewall_infrastructure() {
 ##
 setup_intrusion_prevention() {
     log_info "🛡️ SETUP: Intrusion Prevention System (CrowdSec)"
-    
-    # CrowdSec-Installation und -Konfiguration
-    install_crowdsec_stack
-    
+
+    # 1) CrowdSec-Stack installieren
+    install_crowdsec_stack || { log_error "CrowdSec-Stack-Installation fehlgeschlagen"; return 1; }
+
+    # 2) SSH-Policy anpassen (best effort)
     log_info "  -> Konfiguriere SSH-Schutz-Policies..."
-    tune_crowdsec_ssh_policy
-    
-    # Collections installieren
-    run_with_spinner "Installiere CrowdSec Collections..." \
-        "cscli collections install crowdsecurity/sshd crowdsecurity/linux > /dev/null 2>&1"
-    
-    # Finale Überprüfung der CrowdSec-Dienste
+    tune_crowdsec_ssh_policy || true
+
+    # 3) Hub-Rechte sicherstellen (wichtig gegen 'permission denied')
+    ensure_crowdsec_hub_perms
+
+    # 4) Collections – EINZELN, non-interactive, mit Fallback-Heal
+    local coll
+    for coll in crowdsecurity/sshd crowdsecurity/linux; do
+        run_with_spinner "Installiere CrowdSec Collection: $coll..." \
+          "CROWDSEC_NO_INTERACTIVE=1 cscli hub update -q >/dev/null 2>&1 && \
+           CROWDSEC_NO_INTERACTIVE=1 cscli collections install -y '$coll' >/dev/null 2>&1" \
+        || {
+            log_warn "Installation von '$coll' fehlgeschlagen – versuche Reparatur (Rechte/Index)…"
+            ensure_crowdsec_hub_perms
+            CROWDSEC_NO_INTERACTIVE=1 cscli hub update -q || true
+            CROWDSEC_NO_INTERACTIVE=1 cscli collections install -y "$coll" >/dev/null 2>&1 \
+              || log_warn "Überspringe '$coll' (später manuell: cscli collections install -y $coll)"
+        }
+    done
+
+    # 5) Services prüfen (Setup bricht hier NICHT hart ab; nur Hinweise)
     log_info "  -> Überprüfe CrowdSec-Service-Status..."
     if systemctl is-active --quiet crowdsec && systemctl is-active --quiet crowdsec-bouncer-setonly; then
         log_ok "CrowdSec IPS ist aktiv und in die Firewall integriert."
-        
-        # Erweiterte Verifikation für das zweistufige Setup
         if nft list tables 2>/dev/null | grep -q "crowdsec"; then
             log_ok "  ✅ CrowdSec-NFTables-Integration: Aktiv"
         else
-            log_warn "  ⚠️  CrowdSec-NFTables-Integration: Nicht sichtbar (möglicherweise noch startend)"
+            log_warn "  ⚠️  CrowdSec-NFTables-Integration: (noch) nicht sichtbar"
         fi
-        
     else
         log_error "CrowdSec-Dienste haben Probleme!"
-        log_info "Debug-Befehle:"
-        log_info "  -> systemctl status crowdsec"
-        log_info "  -> systemctl status crowdsec-bouncer-setonly"
-        log_info "  -> journalctl -u crowdsec -n 20"
-        # Nicht return 1 - IPS ist optional für Basis-Funktionalität
+        log_info  "Debug-Befehle:"
+        log_info  "  systemctl status crowdsec"
+        log_info  "  systemctl status crowdsec-bouncer-setonly"
+        log_info  "  journalctl -u crowdsec -n 50"
+        # kein return 1: IPS optional zur Basis-FW
     fi
 }
 
