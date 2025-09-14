@@ -234,13 +234,12 @@ handle_error() {
     local line_number=$2 
     local failed_command=$3
     
-    # Permanente Debug-Ausgabe für bessere Fehlerdiagnose
+    # Permanente Debug-Ausgabe
     echo "DEBUG: ERR-Trap ausgelöst!"
     echo "  Exit-Code: $exit_code"
     echo "  Zeile: $line_number"  
     echo "  Befehl: '$failed_command'"
     
-    # Erweiterte Pattern-Erkennung für arithmetische Operationen
     case "$failed_command" in
         *'(('*'))'*|*'$((*))'*)
             log_debug "Harmlose arithmetische Operation ignoriert: $failed_command"
@@ -248,12 +247,12 @@ handle_error() {
             ;;
         *"systemctl"*|*"apt"*|*"curl"*|*"wget"*|*"cp "*|*"mv "*|*"rm "*|*"mkdir"*)
             log_error "Kritischer Systemfehler in Zeile $line_number: $failed_command"
-            rollback
+            rollback  # ✅ WIEDER HINZUGEFÜGT
             ;;
         *)
             if [ $exit_code -gt 1 ]; then
                 log_error "Schwerwiegender Fehler in Zeile $line_number: $failed_command" 
-                rollback
+                rollback  # ✅ WIEDER HINZUGEFÜGT
             else
                 log_debug "Exit-Code 1 ignoriert für: $failed_command"
             fi

@@ -1,19 +1,19 @@
 #!/bin/bash
 ################################################################################
 #
-# MODUL: MANAGEMENT-CONTAINER - v4.3 KORRIGIERT
+# MODUL: MANAGEMENT-CONTAINER - v4.4 ERR-TRAP-SICHER
 #
 # @description: Startet Management-Container (Portainer, Watchtower) mit
-#               intelligenter Netzwerk-Integration und Fehlerbehandlung
+#               intelligenter Netzwerk-Integration und ERR-Trap-sicherer Verifikation
 # @author:      Markus F. (TZERO78) & KI-Assistenten
 # @repository:  https://github.com/TZERO78/Server-Baukasten
 #
-# ÄNDERUNGEN v4.3:
+# ÄNDERUNGEN v4.4:
+# - ERR-Trap-sichere arithmetische Operationen: ((var++)) → var=$((var + 1))
 # - Robuste Container-Bereinigung vor Neustart
 # - Intelligente Port-Bindung basierend auf Zugriffs-Modell
 # - Bessere Fehlerbehandlung und Status-Verifikation
 # - Tailscale-Integration für sichere Container-Verwaltung
-# - Erweiterte Logging und Debug-Informationen
 #
 ##############################################################################
 
@@ -93,18 +93,18 @@ deploy_portainer_container() {
     cleanup_output=$(docker rm portainer 2>&1 || true)
     [ -n "$cleanup_output" ] && log_debug "Portainer entfernt: $cleanup_output"
     
-    # --- KORRIGIERT: Immer localhost verwenden für Stabilität ---
-    # Problem: Tailscale-IPs sind nach Reboot oft nicht sofort verfügbar
-    # Lösung: Binding auf 127.0.0.1 funktioniert immer
-    local portainer_bind="127.0.0.1:9000:9000"
-    local access_info=""
+    # --- Port-Bindung basierend auf Access-Model bestimmen ---
+    local portainer_bind
+    local access_info
     
     if [ "${ACCESS_MODEL:-2}" = "1" ] && [ "${TAILSCALE_ACTIVE:-false}" = "true" ]; then
-        # VPN-Modell: Zugang über Tailscale-Netz möglich
+        # VPN-Modell: Bind auf Tailscale-IP für direkten VPN-Zugang
         local tailscale_ip="${TAILSCALE_IP:-127.0.0.1}"
+        portainer_bind="${tailscale_ip}:9000:9000"
         access_info="VPN-Zugang: http://${tailscale_ip}:9000 (über Tailscale-Netz)"
     else
         # Öffentliches Modell: Localhost-only für Sicherheit
+        portainer_bind="127.0.0.1:9000:9000"
         access_info="Localhost-only: http://127.0.0.1:9000"
         log_info "     -> Für externen Zugang: SSH-Tunnel oder Reverse-Proxy konfigurieren"
     fi
@@ -210,7 +210,7 @@ deploy_watchtower_container() {
 }
 
 ##
-# Verifiziert den Status aller Management-Container
+# Verifiziert den Status aller Management-Container (ERR-Trap-sicher)
 ##
 verify_management_containers() {
     log_info "  -> Finale Verifikation der Management-Container..."
@@ -218,22 +218,22 @@ verify_management_containers() {
     local running_containers=0
     local total_expected=0
     
-    # Prüfe Portainer
+    # Prüfe Portainer (ERR-Trap-sichere arithmetische Operationen)
     if [ "${INSTALL_PORTAINER:-ja}" = "ja" ]; then
-        ((total_expected++))
-        if docker ps --filter "name=portainer" --format "{{.Names}}" | grep -q "portainer"; then
-            ((running_containers++))
+        total_expected=$((total_expected + 1))
+        if docker ps --filter "name=portainer" --format "{{.Names}}" 2>/dev/null | grep -q "portainer"; then
+            running_containers=$((running_containers + 1))
             log_ok "  ✅ Portainer: Läuft"
         else
             log_error "  ❌ Portainer: Nicht laufend"
         fi
     fi
     
-    # Prüfe Watchtower
+    # Prüfe Watchtower (ERR-Trap-sichere arithmetische Operationen)
     if [ "${INSTALL_WATCHTOWER:-ja}" = "ja" ]; then
-        ((total_expected++))
-        if docker ps --filter "name=watchtower" --format "{{.Names}}" | grep -q "watchtower"; then
-            ((running_containers++))
+        total_expected=$((total_expected + 1))
+        if docker ps --filter "name=watchtower" --format "{{.Names}}" 2>/dev/null | grep -q "watchtower"; then
+            running_containers=$((running_containers + 1))
             log_ok "  ✅ Watchtower: Läuft"
         else
             log_error "  ❌ Watchtower: Nicht laufend"
@@ -261,20 +261,29 @@ verify_management_containers() {
     log_info "  Container stoppen: docker stop <container-name>"
     log_info "  Container entfernen: docker rm <container-name>"
     
-    if [ "${INSTALL_PORTAINER:-ja}" = "ja" ] && docker ps --filter "name=portainer" -q | grep -q .; then
-        local portainer_ip
-        if [ "${ACCESS_MODEL:-2}" = "1" ] && [ -n "${TAILSCALE_IP:-}" ]; then
-            portainer_ip="${TAILSCALE_IP}"
-        else
-            portainer_ip=$(hostname -I | awk '{print $1}')
+    # Portainer-Zugangs-Informationen (ERR-Trap-sicher)
+    if [ "${INSTALL_PORTAINER:-ja}" = "ja" ]; then
+        # Sichere Prüfung ob Container läuft
+        local portainer_running=false
+        if docker ps --filter "name=portainer" -q 2>/dev/null | grep -q .; then
+            portainer_running=true
         fi
         
-        log_info "--- PORTAINER-ZUGANG ---"
-        log_info "  Web-Interface: https://${portainer_ip}:9443"
-        
-        if [ "${ACCESS_MODEL:-2}" = "2" ]; then
-            log_info "  SSH-Tunnel (sicherer): ssh -L 9443:localhost:9443 ${ADMIN_USER:-admin}@${portainer_ip}"
-            log_info "  Dann im Browser: https://localhost:9443"
+        if [ "$portainer_running" = true ]; then
+            local portainer_ip
+            if [ "${ACCESS_MODEL:-2}" = "1" ] && [ -n "${TAILSCALE_IP:-}" ]; then
+                portainer_ip="${TAILSCALE_IP}"
+            else
+                portainer_ip=$(hostname -I 2>/dev/null | awk '{print $1}' || echo "localhost")
+            fi
+            
+            log_info "--- PORTAINER-ZUGANG ---"
+            log_info "  Web-Interface: http://${portainer_ip}:9000"
+            
+            if [ "${ACCESS_MODEL:-2}" = "2" ]; then
+                log_info "  SSH-Tunnel (sicherer): ssh -L 9000:localhost:9000 ${ADMIN_USER:-admin}@${portainer_ip}"
+                log_info "  Dann im Browser: http://localhost:9000"
+            fi
         fi
     fi
     
@@ -282,5 +291,5 @@ verify_management_containers() {
 }
 
 ################################################################################
-# ENDE MODUL MANAGEMENT-CONTAINER v4.3
+# ENDE MODUL MANAGEMENT-CONTAINER v4.4
 ################################################################################
