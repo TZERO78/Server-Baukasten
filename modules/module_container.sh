@@ -203,6 +203,9 @@ EOF
     local max_wait=30
     local docker_interface=""
     
+    # Debug-Modus aktivieren für Problemanalyse
+    set -x
+    
     while [ $wait_time -lt $max_wait ]; do
         sleep 1
         ((wait_time++))
@@ -213,6 +216,7 @@ EOF
             docker_interface=$(ip link show | grep -E '^[0-9]+: docker[0-9]*:' | head -n1 | cut -d: -f2 | tr -d ' ' || echo "")
             
             if [ -n "$docker_interface" ]; then
+                set +x
                 log_ok "Docker erfolgreich initialisiert (Interface: $docker_interface)"
                 break
             fi
@@ -224,12 +228,15 @@ EOF
         fi
     done
     
+    set +x
+    
     # Validierung der Docker-Initialisierung
     if [ -z "$docker_interface" ] || ! docker info >/dev/null 2>&1; then
         log_error "Docker-Initialisierung fehlgeschlagen nach ${wait_time}s!"
         log_error "Debug-Info:"
         systemctl status docker --no-pager || true
         docker info 2>&1 | head -10 || true
+        ip link show | grep docker || log_warn "Kein Docker-Interface gefunden"
         return 1
     fi
 
