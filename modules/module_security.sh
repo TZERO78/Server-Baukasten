@@ -198,54 +198,68 @@ setup_firewall_infrastructure() {
     log_info "  🔄 Docker-Regeln: Werden später hinzugefügt (module_container)"
 }
 
-##
-# Installiert und konfiguriert das Intrusion Prevention System (CrowdSec).
-# UNVERÄNDERT - funktioniert weiterhin parallel zur BASIS-Firewall.
-##
 setup_intrusion_prevention() {
     log_info "🛡️ SETUP: Intrusion Prevention System (CrowdSec)"
-
-    # 1) CrowdSec-Stack installieren
-    install_crowdsec_stack || { log_error "CrowdSec-Stack-Installation fehlgeschlagen"; return 1; }
-
-    # 2) SSH-Policy anpassen (best effort)
+    
+    # CrowdSec-Installation und -Konfiguration
+    install_crowdsec_stack || {
+        log_error "CrowdSec-Stack Installation fehlgeschlagen"
+        return 1
+    }
+    # Roort-Verzeichnis & Rechte sicherstellen
+	ensure_crowdsec_hub_perms
+	
     log_info "  -> Konfiguriere SSH-Schutz-Policies..."
-    tune_crowdsec_ssh_policy || true
+    tune_crowdsec_ssh_policy
+    
+	# Collections installieren mit Robustheitsprüfung
+	log_info "  -> Installiere CrowdSec Collections..."
+	if run_with_spinner "Installiere SSH- und Linux-Collections..." \
+	"cscli collections install crowdsecurity/sshd crowdsecurity/linux 2>/dev/null"; then
+		log_ok "Collections erfolgreich installiert"
+		
+		# Collections-Status verifizieren (auch tainted Collections zählen)
+		local installed_collections
+		installed_collections=$(cscli collections list 2>/dev/null | grep -E "crowdsecurity/(sshd|linux).*enabled" | wc -l || echo 0)
+		if [ "$installed_collections" -ge 2 ]; then
+			log_ok "SSH- und Linux-Collections aktiv"
+			
+			# Zusätzlich prüfen ob Updates verfügbar sind
+			if cscli collections list 2>/dev/null | grep -q "tainted"; then
+				log_info "Hinweis: Collection-Updates verfügbar (cscli collections upgrade)"
+			fi
+		else
+			log_warn "Nicht alle Collections installiert - funktioniert trotzdem"
+		fi
+	else
+		log_warn "Collection-Installation teilweise fehlgeschlagen - CrowdSec funktioniert trotzdem"
+	fi
 
-    # 3) Hub-Rechte sicherstellen (wichtig gegen 'permission denied')
-    ensure_crowdsec_hub_perms
-
-    # 4) Collections – EINZELN, non-interactive, mit Fallback-Heal
-    local coll
-    for coll in crowdsecurity/sshd crowdsecurity/linux; do
-        run_with_spinner "Installiere CrowdSec Collection: $coll..." \
-          "CROWDSEC_NO_INTERACTIVE=1 cscli hub update >/dev/null 2>&1 && \
-           CROWDSEC_NO_INTERACTIVE=1 cscli collections install -y '$coll' >/dev/null 2>&1" \
-        || {
-            log_warn "Installation von '$coll' fehlgeschlagen – versuche Reparatur (Rechte/Index)…"
-            ensure_crowdsec_hub_perms
-            CROWDSEC_NO_INTERACTIVE=1 cscli hub update || true
-            CROWDSEC_NO_INTERACTIVE=1 cscli collections install -y "$coll" >/dev/null 2>&1 \
-              || log_warn "Überspringe '$coll' (später manuell: cscli collections install -y $coll)"
-        }
-    done
-
-    # 5) Services prüfen (Setup bricht hier NICHT hart ab; nur Hinweise)
+    # Finale Überprüfung der CrowdSec-Dienste
     log_info "  -> Überprüfe CrowdSec-Service-Status..."
     if systemctl is-active --quiet crowdsec && systemctl is-active --quiet crowdsec-bouncer-setonly; then
         log_ok "CrowdSec IPS ist aktiv und in die Firewall integriert."
+        
+        # Kurz warten für NFTables-Integration
+        sleep 2
+        
+        # Erweiterte Verifikation für das zweistufige Setup
         if nft list tables 2>/dev/null | grep -q "crowdsec"; then
             log_ok "  ✅ CrowdSec-NFTables-Integration: Aktiv"
         else
-            log_warn "  ⚠️  CrowdSec-NFTables-Integration: (noch) nicht sichtbar"
+            log_warn "  ⚠️ CrowdSec-NFTables-Integration: Nicht sichtbar (möglicherweise noch startend)"
         fi
+        
+        return 0
     else
         log_error "CrowdSec-Dienste haben Probleme!"
-        log_info  "Debug-Befehle:"
-        log_info  "  systemctl status crowdsec"
-        log_info  "  systemctl status crowdsec-bouncer-setonly"
-        log_info  "  journalctl -u crowdsec -n 50"
-        # kein return 1: IPS optional zur Basis-FW
+        log_info "Debug-Befehle:"
+        log_info "  -> systemctl status crowdsec"
+        log_info "  -> systemctl status crowdsec-bouncer-setonly"
+        log_info "  -> journalctl -u crowdsec -n 20"
+        
+        # Nicht return 1 - IPS ist optional für Basis-Funktionalität
+        return 0
     fi
 }
 
