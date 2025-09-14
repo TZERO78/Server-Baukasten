@@ -173,6 +173,65 @@ initialize_geoip_system() {
     log_ok "GeoIP-System erfolgreich initialisiert (Boot-Restore + Timer aktiv)."
 }
 
+##
+# Verifikation der GeoIP-Installation
+##
+verify_geoip_installation() {
+    log_info "  -> Verifiziere GeoIP-Installation..."
+    
+    local verification_errors=0
+    
+    # Prüfe Konfigurationsdateien
+    for config_file in /etc/geoip-countries.conf /etc/geoip-home-country.conf /etc/geoip-allowlist.conf; do
+        if [ ! -f "$config_file" ]; then
+            log_error "Konfigurationsdatei fehlt: $config_file"
+            ((verification_errors++))
+        fi
+    done
+    
+    # Prüfe systemd-Services
+    for service in geoip-boot-restore.service geoip-update.service geoip-update.timer; do
+        if ! systemctl is-enabled "$service" >/dev/null 2>&1; then
+            log_error "Service nicht aktiviert: $service"
+            ((verification_errors++))
+        fi
+    done
+    
+    # Prüfe Update-Skript
+    if [ ! -f /usr/local/bin/update-geoip-sets ] || [ ! -x /usr/local/bin/update-geoip-sets ]; then
+        log_error "Update-Skript fehlt oder ist nicht ausführbar: /usr/local/bin/update-geoip-sets"
+        ((verification_errors++))
+    fi
+    
+    # Prüfe NFTables-Sets
+    local missing_sets=0
+    for set in geoip_allowlist_v4 geoip_allowlist_v6 geoip_home_v4 geoip_home_v6 geoip_blocked_v4 geoip_blocked_v6; do
+        if ! nft list set inet filter "$set" >/dev/null 2>&1; then
+            log_warn "NFTables-Set nicht gefunden: $set"
+            ((missing_sets++))
+        fi
+    done
+    
+    # Prüfe GeoIP-Chain
+    if ! nft list chain inet filter geoip_check >/dev/null 2>&1; then
+        log_error "GeoIP-Chain nicht gefunden: geoip_check"
+        ((verification_errors++))
+    fi
+    
+    # Ergebnis
+    if [ $verification_errors -eq 0 ]; then
+        if [ $missing_sets -eq 0 ]; then
+            log_ok "GeoIP-System vollständig installiert und konfiguriert"
+        else
+            log_warn "GeoIP-System installiert, aber $missing_sets Sets sind noch leer (werden beim nächsten Update befüllt)"
+        fi
+        return 0
+    else
+        log_error "GeoIP-Verifikation fehlgeschlagen: $verification_errors Fehler gefunden"
+        return 1
+    fi
+}
+
 ################################################################################
 # ENDE MODUL GEOIP-BLOCKING-SYSTEM v5.0
 ################################################################################
