@@ -43,6 +43,8 @@ readonly CONF_BASE_URL="https://raw.githubusercontent.com/TZERO78/Server-Baukast
 # ════════════════════════════════════════════════════════════════
 readonly LIB_DIR="${SCRIPT_DIR}/lib"
 readonly MODULES_DIR="${SCRIPT_DIR}/modules"
+readonly COMP_DIR="${SCRIPT_DIR}/components"
+readonly TEMPLATE_DIR="${SCRIPT_DIR}/conf"
 
 # ════════════════════════════════════════════════════════════════
 # SYSTEM-PFADE (ABSOLUT)
