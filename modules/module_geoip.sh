@@ -234,7 +234,16 @@ initialize_geoip_system() {
     # Status-Check nach Update
     if command -v /usr/local/bin/geoip-manager >/dev/null 2>&1; then
         log_info "  -> Prüfe GeoIP-Status nach Installation..."
-        /usr/local/bin/geoip-manager status | head -15
+        log_debug "Aktiviere Debug-Modus für Status-Check..."
+        set -x
+        timeout 30 /usr/local/bin/geoip-manager status | head -15
+        local status_exit=$?
+        set +x
+        
+        if [ $status_exit -ne 0 ]; then
+            log_warn "geoip-manager status schlug fehl (Exit-Code: $status_exit)"
+            log_info "GeoIP-System ist trotzdem installiert - prüfe manuell mit: geoip-manager status"
+        fi
     fi
 
     log_ok "GeoIP-System initialisiert."
