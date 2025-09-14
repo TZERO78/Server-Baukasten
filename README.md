@@ -87,17 +87,16 @@ Automatisierte Einrichtung eines sicheren, produktionsbereiten Linux-Servers mit
 - **Watchtower** für automatische Container-Updates
 - **Tailscale VPN** Integration
 
-## Aktuelle Änderungen & Versionshistorie
+## 📜 Versionshistorie & Änderungen
 
-Alle detaillierten Änderungen, neuen Features und Bugfixes für jede Version werden sorgfältig im
-
-[Vollständige Änderungen](CHANGELOG.md)
+Alle detaillierten Änderungen für jede Version, inklusive neuer Features und Bugfixes, werden sorgfältig im [**CHANGELOG.md**](CHANGELOG.md) dokumentiert.
 
 ## 📋 Systemanforderungen
 
 ### Unterstützte Betriebssysteme
 | OS | Version | Status |
 |-----|---------|---------|
+| Debian | 13 (Trixie) | ✅ Vollständig getestet |
 | Debian | 12 (Bookworm) | ✅ Vollständig getestet |
 | Debian | 11 (Bullseye) | ⚠️ Sollte funktionieren |
 | Ubuntu | 22.04/24.04 | ⚠️ Ungetestet |
