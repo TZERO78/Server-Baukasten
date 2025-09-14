@@ -1,18 +1,17 @@
 #!/bin/bash
 ################################################################################
 #
-# MODUL: VERIFIKATION DES SETUPS - v4.4 KORRIGIERT
+# MODUL: VERIFIKATION DES SETUPS - v4.5 SUDO-NFT KORRIGIERT
 #
 # @description: Prüft den Status der zweistufigen Firewall-Architektur und
 #               aller kritischen Services nach dem neuen Setup-Konzept
 # @author:      Markus F. (TZERO78) & KI-Assistenten
 # @repository:  https://github.com/TZERO78/Server-Baukasten
 #
-# KORREKTUREN v4.4:
-# - Fixed Tailscale-Detection (direkte Suche statt leere Variable)
-# - Fixed Emoji-Formatierung (keine doppelten Emojis)
-# - Fixed Return-Code Logic (verhindert falschen Rollback)
-# - Verbesserte Fehlerklassifizierung
+# KORREKTUREN v4.5:
+# - Fixed NFTables-Zugriff: Alle nft-Befehle mit sudo für korrekte Erkennung
+# - Fixed Tailscale/CrowdSec/Docker Verifikation
+# - Behebt falsche "2 Probleme" Meldung bei funktionierender Firewall
 #
 ################################################################################
 
@@ -20,7 +19,7 @@
 # Hauptfunktion: Umfassende Verifikation aller Setup-Komponenten
 ##
 module_verify_setup() {
-    log_info "🔎 MODUL: Setup-Verifikation (Zweistufige Firewall-Architektur v4.4)"
+    log_info "🔎 MODUL: Setup-Verifikation (Zweistufige Firewall-Architektur v4.5)"
     
     # Sammle Services basierend auf tatsächlicher Konfiguration
     local critical_services=("ssh" "nftables")
@@ -262,7 +261,7 @@ verify_base_firewall_architecture() {
     [ "${SERVER_ROLE:-2}" = "1" ] && required_tables+=("ip6 nat")
     
     for table in "${required_tables[@]}"; do
-        if nft list table $table >/dev/null 2>&1; then
+        if sudo nft list table $table >/dev/null 2>&1; then
             log_debug "      ✅ Tabelle '$table' existiert"
         else
             log_error "      ❌ Tabelle '$table' fehlt!"
@@ -272,7 +271,7 @@ verify_base_firewall_architecture() {
     
     # 3. Haupt-Chains existieren und haben korrekte Policy
     local input_policy
-    input_policy=$(nft list chain inet filter input 2>/dev/null | grep "policy" | awk '{print $NF}' | tr -d ';' || echo "")
+    input_policy=$(sudo nft list chain inet filter input 2>/dev/null | grep "policy" | awk '{print $NF}' | tr -d ';' || echo "")
     
     if [ "$input_policy" = "drop" ]; then
         log_ok "      ✅ Input-Policy: drop (sicher)"
@@ -283,7 +282,7 @@ verify_base_firewall_architecture() {
     
     # 4. GeoIP-Integration (falls aktiviert)
     if [ "${ENABLE_GEOIP_BLOCKING:-nein}" = "ja" ]; then
-        if nft list chain inet filter geoip_check >/dev/null 2>&1; then
+        if sudo nft list chain inet filter geoip_check >/dev/null 2>&1; then
             log_ok "      ✅ GeoIP-Chain existiert"
             
             # Prüfe ob GeoIP-Sets definiert sind
@@ -291,7 +290,7 @@ verify_base_firewall_architecture() {
             local missing_sets=0
             
             for set in "${geoip_sets[@]}"; do
-                if ! nft list set inet filter "$set" >/dev/null 2>&1; then
+                if ! sudo nft list set inet filter "$set" >/dev/null 2>&1; then
                     ((missing_sets++))
                 fi
             done
@@ -309,7 +308,7 @@ verify_base_firewall_architecture() {
     
     # 5. Regel-Count Plausibilität
     local total_rules
-    total_rules=$(nft list ruleset 2>/dev/null | grep -c "^[[:space:]]*[^#]" || echo "0")
+    total_rules=$(sudo nft list ruleset 2>/dev/null | grep -c "^[[:space:]]*[^#]" || echo "0")
     
     if [ "$total_rules" -gt 5 ]; then
         log_ok "      ✅ Firewall hat $total_rules aktive Regeln (plausibel)"
@@ -332,11 +331,11 @@ verify_dynamic_firewall_extensions() {
         log_info "      -> VPN-Modell konfiguriert: Prüfe Tailscale-Integration..."
         
         # Prüfe Tailscale-Firewall-Regeln
-        if nft list ruleset 2>/dev/null | grep -q "tailscale0"; then
+        if sudo nft list ruleset 2>/dev/null | grep -q "tailscale0"; then
             log_ok "        ✅ Tailscale-Firewall-Integration aktiv"
             
             # Prüfe NAT-Regeln
-            if nft list table ip nat 2>/dev/null | grep -q "tailscale0"; then
+            if sudo nft list table ip nat 2>/dev/null | grep -q "tailscale0"; then
                 log_ok "        ✅ Tailscale-NAT-Regeln aktiv"
             else
                 log_warn "        ⚠️ Tailscale-NAT-Regeln fehlen"
@@ -344,7 +343,7 @@ verify_dynamic_firewall_extensions() {
             fi
         else
             log_error "        ❌ Tailscale-Firewall-Regeln fehlen!"
-            extension_issues=$((extension_issues + 1))  # KORRIGIERT: Einheitlich
+            extension_issues=$((extension_issues + 1))
         fi
         
         # Prüfe Tailscale-Verbindung (verbesserte Logik)
@@ -371,7 +370,7 @@ verify_dynamic_firewall_extensions() {
         
         if systemctl is-active --quiet docker 2>/dev/null; then
             # Prüfe Docker-Firewall-Integration
-            if nft list ruleset 2>/dev/null | grep -q "docker"; then
+            if sudo nft list ruleset 2>/dev/null | grep -q "docker"; then
                 log_ok "        ✅ Docker-Firewall-Integration aktiv"
             else
                 log_warn "        ⚠️ Docker-Firewall-Regeln nicht sichtbar"
@@ -414,7 +413,7 @@ verify_dynamic_firewall_extensions() {
         
         # Prüfe CrowdSec-Tabellen (robuster)
         local crowdsec_tables
-        crowdsec_tables=$(nft list tables 2>/dev/null | grep -E "(crowdsec|crowdsec6)" | wc -l)
+        crowdsec_tables=$(sudo nft list tables 2>/dev/null | grep -E "(crowdsec|crowdsec6)" | wc -l)
         if [ "$crowdsec_tables" -gt 0 ]; then
             log_ok "        ✅ CrowdSec-Firewall-Tabellen aktiv ($crowdsec_tables gefunden)"
         else
@@ -451,7 +450,10 @@ verify_dynamic_firewall_extensions() {
         log_warn "    -> $extension_issues Problem(e) bei dynamischen Firewall-Erweiterungen gefunden"
     fi
     
+    # ERR-Trap temporär deaktivieren für return
+    set +e
     return $extension_issues
+    set -e
 }
 
 ##
@@ -584,5 +586,5 @@ verify_network_connectivity() {
 }
 
 ################################################################################
-# ENDE MODUL SETUP-VERIFIKATION v4.4 KORRIGIERT
+# ENDE MODUL SETUP-VERIFIKATION v4.5 SUDO-NFT KORRIGIERT
 ################################################################################
