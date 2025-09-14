@@ -1,14 +1,15 @@
 #!/bin/bash
 ################################################################################
 #
-# MODUL: CONTAINER (DOCKER) - v4.3 KORRIGIERT
+# MODUL: CONTAINER (DOCKER) - v4.4 MIT INSTALLATION
 #
-# @description: Konfiguriert Docker-Engine mit gehärteter Konfiguration und
-#               dynamischer Firewall-Integration über activate_docker_rules()
+# @description: Installiert und konfiguriert Docker-Engine mit gehärteter 
+#               Konfiguration und dynamischer Firewall-Integration
 # @author:      Markus F. (TZERO78) & KI-Assistenten  
 # @repository:  https://github.com/TZERO78/Server-Baukasten
 #
-# ÄNDERUNGEN v4.3:
+# ÄNDERUNGEN v4.4:
+# - Docker-Installation hinzugefügt (offizielle Docker-Repository)
 # - Nutzt activate_docker_rules() für dynamische Firewall-Integration
 # - Bessere Docker-Interface-Erkennung und Validierung
 # - Robuste systemd-Abhängigkeiten für NFTables-Integration
@@ -18,8 +19,8 @@
 ################################################################################
 
 ##
-# Hauptfunktion: Konfiguriert Docker-Engine mit gehärteter Konfiguration
-# und integriert es sauber in die NFTables-Firewall
+# Hauptfunktion: Installiert und konfiguriert Docker-Engine mit gehärteter 
+# Konfiguration und integriert es sauber in die NFTables-Firewall
 ##
 module_container() {
     # Guard Clause: Nur ausführen wenn SERVER_ROLE=1 (Docker-Host)
@@ -30,16 +31,54 @@ module_container() {
     
     log_info "🐳 MODUL: Container-Engine (Docker mit NFTables-Integration)"
 
-    # --- SCHRITT 1: Docker-Konfigurationsverzeichnis sicherstellen ---
-    log_info "  -> 1/6: Bereite Docker-Konfiguration vor..."
+    # --- SCHRITT 1: Docker-Installation prüfen und durchführen ---
+    log_info "  -> 1/7: Prüfe Docker-Installation..."
+    
+    if ! command -v docker >/dev/null 2>&1; then
+        log_info "     -> Docker nicht gefunden - installiere Docker-Engine..."
+        
+        # Repository-Schlüssel und Quelle hinzufügen
+        apt-get update
+        apt-get install -y ca-certificates curl gnupg
+        
+        # Docker GPG-Schlüssel hinzufügen
+        install -m 0755 -d /etc/apt/keyrings
+        if ! curl -fsSL https://download.docker.com/linux/debian/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg; then
+            log_error "Fehler beim Hinzufügen des Docker GPG-Schlüssels!"
+            return 1
+        fi
+        chmod a+r /etc/apt/keyrings/docker.gpg
+        
+        # Docker Repository hinzufügen
+        echo \
+        "deb [arch="$(dpkg --print-architecture)" signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/debian \
+        "$(. /etc/os-release && echo "$VERSION_CODENAME")" stable" | \
+        tee /etc/apt/sources.list.d/docker.list > /dev/null
+        
+        # Docker installieren
+        apt-get update
+        if ! apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin; then
+            log_error "Docker-Installation fehlgeschlagen!"
+            return 1
+        fi
+        
+        log_ok "Docker erfolgreich installiert."
+    else
+        local docker_version
+        docker_version=$(docker --version 2>/dev/null | cut -d' ' -f3 | tr -d ',' || echo "Unbekannt")
+        log_ok "Docker bereits installiert (Version: $docker_version)"
+    fi
+
+    # --- SCHRITT 2: Docker-Konfigurationsverzeichnis sicherstellen ---
+    log_info "  -> 2/7: Bereite Docker-Konfiguration vor..."
     mkdir -p /etc/docker
     local daemon_json="/etc/docker/daemon.json"
     
     # Backup der existierenden Konfiguration (falls vorhanden)
     backup_and_register "$daemon_json"
 
-    # --- SCHRITT 2: Gehärtete Docker-Daemon-Konfiguration erstellen ---
-    log_info "  -> 2/6: Erstelle gehärtete Docker-Daemon-Konfiguration..."
+    # --- SCHRITT 3: Gehärtete Docker-Daemon-Konfiguration erstellen ---
+    log_info "  -> 3/7: Erstelle gehärtete Docker-Daemon-Konfiguration..."
     
     # Berechne Docker-Gateway-IP aus CIDR
     local docker_gateway_ip
@@ -101,8 +140,8 @@ module_container() {
     
     log_ok "Gehärtete Docker-Konfiguration erstellt ($daemon_json)"
 
-    # --- SCHRITT 3: systemd-Integration für korrekte Start-Reihenfolge ---
-    log_info "  -> 3/6: Konfiguriere systemd-Abhängigkeiten für NFTables-Integration..."
+    # --- SCHRITT 4: systemd-Integration für korrekte Start-Reihenfolge ---
+    log_info "  -> 4/7: Konfiguriere systemd-Abhängigkeiten für NFTables-Integration..."
     
     local override_dir="/etc/systemd/system/docker.service.d"
     mkdir -p "$override_dir"
@@ -136,11 +175,12 @@ EOF
 
     log_ok "systemd-Abhängigkeiten für Docker konfiguriert."
 
-    # --- SCHRITT 4: systemd-Konfiguration neu laden ---
+    # --- SCHRITT 5: systemd-Konfiguration neu laden ---
+    log_info "  -> 5/7: Lade systemd-Konfiguration neu..."
     run_with_spinner "Lade systemd-Konfiguration neu..." "systemctl daemon-reload"
 
-    # --- SCHRITT 5: Docker-Service starten und aktivieren ---
-    log_info "  -> 4/6: Starte Docker-Engine mit neuer Konfiguration..."
+    # --- SCHRITT 6: Docker-Service starten und aktivieren ---
+    log_info "  -> 6/7: Starte Docker-Engine mit neuer Konfiguration..."
     
     # Stoppe Docker falls läuft (für sauberen Neustart mit neuer Config)
     if systemctl is-active --quiet docker; then
@@ -156,8 +196,8 @@ EOF
         return 1
     fi
 
-    # --- SCHRITT 6: Warte auf Docker-Initialisierung ---
-    log_info "  -> 5/6: Warte auf vollständige Docker-Initialisierung..."
+    # --- SCHRITT 7: Warte auf Docker-Initialisierung und Firewall-Integration ---
+    log_info "  -> 7/7: Warte auf vollständige Docker-Initialisierung..."
     
     local wait_time=0
     local max_wait=30
@@ -193,8 +233,8 @@ EOF
         return 1
     fi
 
-    # --- SCHRITT 7: Firewall-Integration aktivieren ---
-    log_info "  -> 6/6: Aktiviere Docker-Firewall-Integration..."
+    # --- Firewall-Integration aktivieren ---
+    log_info "     -> Aktiviere Docker-Firewall-Integration..."
     
     # Ermittle Tailscale-Interface falls verfügbar
     local tailscale_interface="${TAILSCALE_INTERFACE:-}"
@@ -214,8 +254,8 @@ EOF
         # Nicht return 1 - Docker selbst funktioniert ja
     fi
 
-    # --- SCHRITT 8: Finale Verifikation und Statusanzeige ---
-    log_info "  -> Finale Docker-Status-Verifikation..."
+    # --- Finale Verifikation und Statusanzeige ---
+    log_info "     -> Finale Docker-Status-Verifikation..."
     
     # Service-Status
     if systemctl is-active --quiet docker; then
@@ -244,7 +284,7 @@ EOF
     log_info "     -> Vorhandene Container: $container_count"
 
     # --- ERFOLGS-ZUSAMMENFASSUNG ---
-    log_ok "🎉 Docker-Engine erfolgreich konfiguriert und integriert!"
+    log_ok "🎉 Docker-Engine erfolgreich installiert, konfiguriert und integriert!"
     log_info "--- DOCKER-KONFIGURATION ---"
     log_info "  🐳 Version: $docker_version"
     log_info "  🌐 IPv4-Netzwerk: $DOCKER_IPV4_CIDR (Gateway: $docker_gateway_ip)"
@@ -273,5 +313,5 @@ EOF
 }
 
 ################################################################################
-# ENDE MODUL CONTAINER v4.3
+# ENDE MODUL CONTAINER v4.4
 ################################################################################
