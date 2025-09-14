@@ -37,6 +37,43 @@ cleanup_crowdsec() {
   log_ok "CrowdSec bereinigt"
 }
 
+ensure_crowdsec_hub_perms() {
+  # Eigentümer & Rechte für Laufzeitdaten korrekt setzen
+  install -d -m 0755 -o crowdsec -g crowdsec /var/lib/crowdsec /var/lib/crowdsec/hub /var/lib/crowdsec/data
+  chown -R crowdsec:crowdsec /var/lib/crowdsec
+  chmod 0755 /var/lib/crowdsec /var/lib/crowdsec/hub /var/lib/crowdsec/data
+}
+
+set_bouncer_api_key_yq() {
+  # Nutzung: set_bouncer_api_key_yq <config.yml> <keyfile>
+  local conf="$1" key="$2"
+
+  # Checks
+  [ -n "$conf" ] && [ -n "$key" ] || { log_error "API-Key-Helper: Pfade fehlen"; return 1; }
+  [ -s "$conf" ] || { log_error "API-Key-Helper: Config fehlt/leer: $conf"; return 1; }
+  [ -s "$key"  ] || { log_error "API-Key-Helper: Key fehlt/leer: $key"; return 1; }
+  command -v yq >/dev/null || { log_error "API-Key-Helper: yq nicht installiert"; return 1; }
+
+  # Rechte härten (root only liest Key; Config für root:root lesbar)
+  chown root:root "$key" "$conf" 2>/dev/null || true
+  chmod 600 "$key"  2>/dev/null || true
+  chmod 640 "$conf" 2>/dev/null || true
+
+  # Key sicher eintragen (load_str + Newline strip)
+  export KEYFILE="$key"
+  yq e -i '.api_key = (load_str(env(KEYFILE)) | sub("\\r?\\n$"; ""))' "$conf" \
+    || { log_error "API-Key-Helper: yq-Set fehlgeschlagen"; return 1; }
+
+  # Optional: Verifizieren
+  local k c
+  k="$(tr -d '\r\n' < "$key")"
+  c="$(yq e -r '.api_key' "$conf" 2>/dev/null)"
+  [ "$k" = "$c" ] || { log_error "API-Key-Helper: Verifikation fehlgeschlagen"; return 1; }
+
+  log_ok "API-Key in '$conf' gesetzt"
+}
+
+
 ## Dedizierter systemd-Service für set-only Mode
 create_setonly_bouncer_service() {
   log_info "  -> Erstelle dedizierten systemd-Service für set-only Mode..."
@@ -99,6 +136,8 @@ install_crowdsec() {
   setup_crowdsec_repository || return 1
   install_crowdsec_packages crowdsec || return 1
 
+  ensure_crowdsec_hub_perms
+  
   log_info "  -> Konfiguriere systemd-Service..."
   mkdir -p /etc/systemd/system/crowdsec.service.d
   cat > /etc/systemd/system/crowdsec.service.d/override.conf <<'EOF'
@@ -122,6 +161,7 @@ EOF
     log_error "CrowdSec-Agent konnte nicht gestartet werden"
     return 1
   fi
+
 }
 
 ## Installiert nur den Firewall-Bouncer
@@ -166,15 +206,16 @@ install_crowdsec_firewall_bouncer() {
   yq e -i '.nftables.ipv6.chain = "crowdsec6-chain"'    "$local_yml"
   yq e -i '.blacklists_ipv6 = "crowdsec6-blacklists"'   "$local_yml"
 
-  # API-Key erzeugen (falls fehlt) und sicher eintragen
-  if [ ! -s "$keyfile" ]; then
-    install -m600 /dev/null "$keyfile"
-    cscli bouncers add firewall-bouncer -o raw >"$keyfile" \
-      || { log_error "API-Key-Generierung fehlgeschlagen"; return 1; }
-  fi
-  export KEYFILE="$keyfile"
-  yq e -i '.api_key = (load_str(env(KEYFILE)) | sub("\\r?\\n$"; ""))' "$local_yml"
-  log_info "     🔑 API-Key konfiguriert"
+	# API-Key erzeugen (falls fehlt)
+	if [ ! -s "$keyfile" ]; then
+	install -m600 /dev/null "$keyfile"
+	cscli bouncers add "firewall-bouncer-$(hostname -s 2>/dev/null || echo default)" -o raw >"$keyfile" \
+		|| { log_error "API-Key-Generierung fehlgeschlagen"; return 1; }
+	fi
+
+	# API-Key sicher via yq eintragen
+	set_bouncer_api_key_yq "$local_yml" "$keyfile" || return 1
+	log_info "     🔑 API-Key konfiguriert"
 
   # Config vor Enable testen
   /usr/bin/crowdsec-firewall-bouncer -c "$local_yml" -t >/dev/null 2>&1 \
