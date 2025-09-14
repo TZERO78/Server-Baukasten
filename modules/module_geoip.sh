@@ -1,7 +1,7 @@
 #!/bin/bash
 ################################################################################
 #
-# MODUL: GEOIP-BLOCKING-SYSTEM (v5.2) - NUTZT GEOIP-MANAGER
+# MODUL: GEOIP-BLOCKING-SYSTEM (v5.2-SLIM) - NUTZT GEOIP-MANAGER
 #
 # @description: Installiert das GeoIP-System und nutzt geoip-manager für alles andere
 # @author:      Markus F. (TZERO78) & KI-Assistenten  
@@ -161,10 +161,10 @@ EOF
     # Timer
     cat > /etc/systemd/system/geoip-update.timer << 'EOF'
 [Unit]
-Description=Run GeoIP update weekly
+Description=Run GeoIP update monthly
 
 [Timer]
-OnCalendar=Sun --* 02:00:00
+OnCalendar=monthly
 RandomizedDelaySec=12h
 Persistent=true
 
@@ -241,5 +241,5 @@ initialize_geoip_system() {
 }
 
 ################################################################################
-# ENDE MODUL GEOIP-BLOCKING-SYSTEM v5.2
+# ENDE MODUL GEOIP-BLOCKING-SYSTEM v5.2-SLIM
 ################################################################################
