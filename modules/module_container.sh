@@ -31,8 +31,14 @@ module_container() {
     
     log_info "🐳 MODUL: Container-Engine (Docker mit NFTables-Integration)"
 
-    # --- SCHRITT 1: Docker-Installation prüfen und durchführen ---
+    # --- SCHRITT 1: Docker-Installation und AppArmor-Kompatibilität ---
     log_info "  -> 1/7: Prüfe Docker-Installation..."
+    
+    # AppArmor-Kompatibilität für runc sicherstellen
+    if command -v aa-status >/dev/null 2>&1 && aa-status | grep -q "runc"; then
+        log_info "     -> Deaktiviere AppArmor für runc (Docker-Kompatibilität)..."
+        aa-disable runc 2>/dev/null || true
+    fi
     
     if ! command -v docker >/dev/null 2>&1; then
         log_info "     -> Docker nicht gefunden - installiere Docker-Engine..."
@@ -94,7 +100,7 @@ module_container() {
     log_info "     -> Docker-Netzwerk: $DOCKER_IPV4_CIDR (Gateway: $docker_gateway_ip)"
     log_info "     -> IPv6-Netzwerk: $DOCKER_IPV6_CIDR"
     
-    # Generiere daemon.json mit allen Sicherheits- und Performance-Optimierungen
+    # Generiere daemon.json mit iptables-nft Kompatibilität
     jq -n \
     --arg bip "$docker_gateway_ip/$(echo "$DOCKER_IPV4_CIDR" | cut -d'/' -f2)" \
     --arg fixed_cidr "$DOCKER_IPV4_CIDR" \
@@ -106,8 +112,7 @@ module_container() {
         "ipv6": true,
         "fixed-cidr-v6": $fixed_cidr_v6,
         
-        # FIREWALL-INTEGRATION (KRITISCH für NFTables-Kompatibilität)
-        "ip6tables": true,
+        # FIREWALL-INTEGRATION (iptables-nft Backend)
         "iptables": true,
         
         # LOGGING (strukturiert für systemd)
