@@ -44,6 +44,9 @@ create_setonly_bouncer_service() {
   local config_file="/etc/crowdsec/bouncers/crowdsec-firewall-bouncer.yaml.local"
   export CONFIG_FILE="$config_file"
 
+  # Debug: CONF_BASE_URL prüfen
+  log_debug "CONF_BASE_URL ist gesetzt auf: '${CONF_BASE_URL:-LEER}'"
+
   log_debug "VPS-Umgebung: Nur NFTables, kein UFW - optimal! ✅"
   local primary_interface; primary_interface="$(ip route | awk '/default/{print $5; exit}')" || true
   log_debug "Primäres Interface: ${primary_interface:-unbekannt}"
@@ -263,7 +266,7 @@ install_crowdsec_stack() {
   log_info "⚙️  Installiere und konfiguriere den CrowdSec-Stack..."
   
   cleanup_crowdsec 
-  
+
  
   if install_crowdsec && install_crowdsec_firewall_bouncer; then
     tune_crowdsec_ssh_policy
