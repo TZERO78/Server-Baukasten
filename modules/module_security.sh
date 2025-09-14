@@ -219,12 +219,12 @@ setup_intrusion_prevention() {
     local coll
     for coll in crowdsecurity/sshd crowdsecurity/linux; do
         run_with_spinner "Installiere CrowdSec Collection: $coll..." \
-          "CROWDSEC_NO_INTERACTIVE=1 cscli hub update -q >/dev/null 2>&1 && \
+          "CROWDSEC_NO_INTERACTIVE=1 cscli hub update >/dev/null 2>&1 && \
            CROWDSEC_NO_INTERACTIVE=1 cscli collections install -y '$coll' >/dev/null 2>&1" \
         || {
             log_warn "Installation von '$coll' fehlgeschlagen – versuche Reparatur (Rechte/Index)…"
             ensure_crowdsec_hub_perms
-            CROWDSEC_NO_INTERACTIVE=1 cscli hub update -q || true
+            CROWDSEC_NO_INTERACTIVE=1 cscli hub update || true
             CROWDSEC_NO_INTERACTIVE=1 cscli collections install -y "$coll" >/dev/null 2>&1 \
               || log_warn "Überspringe '$coll' (später manuell: cscli collections install -y $coll)"
         }
