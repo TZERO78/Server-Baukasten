@@ -236,14 +236,11 @@ initialize_geoip_system() {
         log_info "  -> Prüfe GeoIP-Status nach Installation..."
         log_debug "Aktiviere Debug-Modus für Status-Check..."
         set -x
-        timeout 30 /usr/local/bin/geoip-manager status | head -15
-        local status_exit=$?
+        set +e  # Verhindere ERR-Trap bei Pipes
+        timeout 30 /usr/local/bin/geoip-manager status | head -15 || true
+        set -e  # Reaktiviere ERR-Trap
         set +x
-        
-        if [ $status_exit -ne 0 ]; then
-            log_warn "geoip-manager status schlug fehl (Exit-Code: $status_exit)"
-            log_info "GeoIP-System ist trotzdem installiert - prüfe manuell mit: geoip-manager status"
-        fi
+        log_debug "Status-Check abgeschlossen."
     fi
 
     log_ok "GeoIP-System initialisiert."
