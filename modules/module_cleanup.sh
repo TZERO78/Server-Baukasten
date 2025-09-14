@@ -103,6 +103,6 @@ module_cleanup() {
     systemctl restart systemd-journald
     log_ok "Journal-Logs wurden rotiert."
 
-    set -e; trap 'rollback' ERR
+    set -e; trap 'handle_error $? $LINENO $BASH_COMMAND' ERR
     log_ok "Lückenlose Systembereinigung vollständig abgeschlossen."
 }
