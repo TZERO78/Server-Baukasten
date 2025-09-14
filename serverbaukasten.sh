@@ -233,7 +233,13 @@ handle_error() {
     local exit_code=$1
     local line_number=$2 
     local failed_command=$3
-    
+	
+	# TEMPORÄRES DEBUG
+    echo "DEBUG: ERR-Trap ausgelöst!"
+    echo "  Exit-Code: $exit_code"
+    echo "  Zeile: $line_number"  
+    echo "  Befehl: '$failed_command'"
+
     # Nur bei kritischen System-Operationen Rollback
     case "$failed_command" in
         *"systemctl"*|*"apt"*|*"curl"*|*"wget"*|*"cp "*|*"mv "*|*"rm "*|*"mkdir"*)
