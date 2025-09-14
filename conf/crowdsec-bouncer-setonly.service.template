@@ -1,0 +1,47 @@
+[Unit]
+Description=CrowdSec Firewall Bouncer (Set-Only Mode) - Server-Baukasten
+Documentation=https://docs.crowdsec.net/docs/bouncers/firewall/
+After=multi-user.target crowdsec.service nftables.service
+Wants=crowdsec.service nftables.service
+ConditionPathExists=$config_file
+
+[Service]
+Type=simple
+User=root
+Group=root
+
+# Warte bis CrowdSec API verfügbar ist
+ExecStartPre=/bin/bash -c 'until cscli metrics >/dev/null 2>&1; do sleep 2; done'
+
+# KORRIGIERT: Konfiguration testen
+ExecStartPre=/usr/bin/crowdsec-firewall-bouncer -c $config_file -t
+
+# Haupt-Service starten  
+ExecStart=/usr/bin/crowdsec-firewall-bouncer -c $config_file
+
+# Robuster Restart bei Problemen
+Restart=on-failure
+RestartSec=15s
+StartLimitBurst=3
+StartLimitIntervalSec=300
+
+# Timeouts für bessere Kontrolle
+TimeoutStartSec=60
+TimeoutStopSec=30
+
+# Sicherheits-Härtung
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/var/log /var/run
+
+# Umgebung - WICHTIG: Metrics-Problem in set-only Mode beheben
+Environment=BOUNCER_MODE=set-only
+Environment=BOUNCER_DISABLE_METRICS=true
+Environment=BOUNCER_LOG_LEVEL=info
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=crowdsec-bouncer-setonly
+
+[Install]
+WantedBy=multi-user.target
