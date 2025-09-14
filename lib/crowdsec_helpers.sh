@@ -3,6 +3,10 @@
 # BIBLIOTHEK: CROWDSEC-HELFER-FUNKTIONEN
 ################################################################################
 
+declare -g crowdsec_config_file=""
+
+
+
 # --- Logging-Dummies (falls global nicht geladen) ---
 command -v log_info  >/dev/null || log_info()  { echo -e "ℹ️  $*"; }
 command -v log_ok    >/dev/null || log_ok()    { echo -e "✅ $*"; }
@@ -118,7 +122,7 @@ create_setonly_bouncer_service() {
   log_info "  -> Erstelle dedizierten systemd-Service für set-only Mode..."
   local service_file="/etc/systemd/system/crowdsec-bouncer-setonly.service"
   local config_file="/etc/crowdsec/bouncers/crowdsec-firewall-bouncer.yaml.local"
-  export CONFIG_FILE="$config_file"
+  export CONFIG_FILE="$crowdsec_config_file"
 
 
 
@@ -140,25 +144,25 @@ create_setonly_bouncer_service() {
   fi
 
   # Bouncer-Grundwerte per yq (nur wenn Config existiert)
-  if [ -s "$config_file" ]; then
+  if [ -s "$crowdsec_config_file" ]; then
     ensure_yq_v4 || return 1
-    yq e -i '.mode = "nftables"'                       "$config_file"
-    yq e -i '.log_level = "info"'                      "$config_file"
-    yq e -i '.debug = false'                           "$config_file"
-    yq e -i '.update_frequency = "30s"'                "$config_file"
-    yq e -i '.disable_ipv6 = false'                    "$config_file"
-    yq e -i '.nftables.ipv4.enabled = true'            "$config_file"
-    yq e -i '.nftables.ipv6.enabled = true'            "$config_file"
-    yq e -i '.nftables.ipv4."set-only" = true'         "$config_file"
-    yq e -i '.nftables.ipv6."set-only" = true'         "$config_file"
-    yq e -i '.nftables.ipv4.table = "crowdsec"'        "$config_file"
-    yq e -i '.nftables.ipv6.table = "crowdsec6"'       "$config_file"
-    yq e -i '.nftables.ipv4.chain = "crowdsec-chain"'  "$config_file"
-    yq e -i '.nftables.ipv6.chain = "crowdsec6-chain"' "$config_file"
-    yq e -i '.blacklists_ipv4 = "crowdsec-blacklists"' "$config_file"
-    yq e -i '.blacklists_ipv6 = "crowdsec6-blacklists"' "$config_file"
+    yq e -i '.mode = "nftables"'                       "$crowdsec_config_file"
+    yq e -i '.log_level = "info"'                      "$crowdsec_config_file"
+    yq e -i '.debug = false'                           "$crowdsec_config_file"
+    yq e -i '.update_frequency = "30s"'                "$crowdsec_config_file"
+    yq e -i '.disable_ipv6 = false'                    "$crowdsec_config_file"
+    yq e -i '.nftables.ipv4.enabled = true'            "$crowdsec_config_file"
+    yq e -i '.nftables.ipv6.enabled = true'            "$crowdsec_config_file"
+    yq e -i '.nftables.ipv4."set-only" = true'         "$crowdsec_config_file"
+    yq e -i '.nftables.ipv6."set-only" = true'         "$crowdsec_config_file"
+    yq e -i '.nftables.ipv4.table = "crowdsec"'        "$crowdsec_config_file"
+    yq e -i '.nftables.ipv6.table = "crowdsec6"'       "$crowdsec_config_file"
+    yq e -i '.nftables.ipv4.chain = "crowdsec-chain"'  "$crowdsec_config_file"
+    yq e -i '.nftables.ipv6.chain = "crowdsec6-chain"' "$crowdsec_config_file"
+    yq e -i '.blacklists_ipv4 = "crowdsec-blacklists"' "$crowdsec_config_file"
+    yq e -i '.blacklists_ipv6 = "crowdsec6-blacklists"' "$crowdsec_config_file"
   else
-    log_warn "Bouncer-Config ($config_file) fehlt noch – wird später gesetzt."
+    log_warn "Bouncer-Config ($crowdsec_config_file) fehlt noch – wird später gesetzt."
   fi
 
   systemctl daemon-reload

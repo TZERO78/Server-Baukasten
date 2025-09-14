@@ -295,4 +295,34 @@ load_config_from_file() {
   log_ok "🎉 Konfiguration erfolgreich geladen und validiert!"
 }
 
+## Sensible Konfig aufräumen (optional)
+cleanup_sensitive_data() {
+    local TEST_MODE="$1"
+    if [ "$TEST_MODE" = true ]; then
+        log_warn "TEST-MODUS: Überspringe Bereinigung der sensiblen Konfigurationsdatei."
+        return 0
+    fi
+    if [ -n "${CONFIG_FILE:-}" ] && [ -f "$CONFIG_FILE" ]; then
+        print_section_header "SICHERHEIT" "SENSIBLE DATEN BEREINIGEN" "🔒"
+        log_warn "Die Konfigurationsdatei '$CONFIG_FILE' enthält Klartext-Passwörter!"
+        log_info "Empfehlung: Sicheres Löschen (shred)"
+        local cleanup_choice; prompt_for_yes_no "Soll die Konfigurationsdatei jetzt sicher gelöscht werden?" "cleanup_choice" "ja"
+        if [ "$cleanup_choice" = "ja" ]; then
+            if command -v shred &>/dev/null; then
+                run_with_spinner "Lösche Konfigurationsdatei sicher (shred)..." "shred -n 3 -uz '$CONFIG_FILE'" || rm -f "$CONFIG_FILE"
+                log_ok "Konfigurationsdatei sicher gelöscht."
+            else
+                log_warn "'shred' nicht installiert – nutze 'rm'."
+                rm -f "$CONFIG_FILE"; log_ok "Konfigurationsdatei gelöscht (evtl. wiederherstellbar)."
+            fi
+        else
+            log_error "KONFIGURATIONSDATEI WURDE NICHT GELÖSCHT!"
+            log_warn  "Die Datei enthält weiterhin Klartext-Passwörter."
+            log_info  "  -> Manuell löschen mit: shred -u '$CONFIG_FILE'"
+        fi
+    else
+        log_info "Keine Konfigurationsdatei verwendet."
+    fi
+}
+
 # Ende ------------------------------------------------------------------------
