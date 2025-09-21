@@ -31,7 +31,7 @@ und dieses Projekt folgt [Semantic Versioning](https://semver.org/lang/de/).
 
 ## [5.3] - 2025-09-14
 
-### ✨ Hinzugefügt (Added)
+### Hinzugefügt (Added)
 - **Kontrollierte Ausführung:** Eine neue `execute_step`-Engine im Hauptskript steuert und protokolliert jeden einzelnen Setup-Schritt.
 - **Idempotentes Design:** Einführung von `idempotent_helpers`, damit das Skript sicher mehrfach ausgeführt werden kann.
 - **Modulare Blaupause:** Eine neue `module_base.sh` dient als standardisierte Vorlage für alle Module.
@@ -40,14 +40,14 @@ und dieses Projekt folgt [Semantic Versioning](https://semver.org/lang/de/).
 - **Professionelles Error-Handling:** Ein globaler `trap`-Mechanismus mit intelligenter Fehlerbewertung und Rollback-Fähigkeit.
 - **Finale Selbst-Verifikation:** Ein `module_verify` prüft am Ende des Setups die korrekte Installation und Integration aller Komponenten.
 
-### ♻️ Geändert (Changed)
+### Geändert (Changed)
 - **Architektur-Refactoring:** Komplette Umstellung von einem einzelnen Skript auf ein modulares Framework (`/lib`, `/modules`).
 - **Rolle des Hauptskripts:** `serverbaukasten.sh` agiert nun als zentraler "Dirigent", der nur noch den Ablauf steuert.
 
-### 🐛 Behoben (Fixed)
+### Behoben (Fixed)
 - Zahlreiche kleinere Bugfixes und Stabilitätsverbesserungen im gesamten Skript zur Erhöhung der Robustheit.
 
-### 🧪 Getestet (Tested)
+### Getestet (Tested)
 - **Debian 13 (Trixie):** Die vollständige Funktionalität wurde auf einem VPS mit dem kommenden Debian 13 erfolgreich verifiziert. Das Skript ist damit zukunftssicher für das nächste Debian-Release.
 
 ## [5.2.1] - 2025-09-12
