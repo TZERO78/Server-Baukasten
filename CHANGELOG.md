@@ -7,26 +7,35 @@ und dieses Projekt folgt [Semantic Versioning](https://semver.org/lang/de/).
 
 ## [5.3.1] - 2025-09-21
 
+### Added
+- `modules/module_mail_setup.sh`: Neues msmtp-Modul (idempotent)
+  - Validierung der SMTP-Variablen; optionaler Rollback (falls `rollback` vorhanden)
+  - `/etc/msmtprc` (600) mit `user` + `passwordeval` über `/etc/msmtp.pass` (600)
+  - Journald-Drop-in für Mail-Logs
+  - TLS-sensitiver Reachability-Check (`--serverinfo` mit `--tls-starttls`/`--tls`) vor optionaler Test-Mail
+  - `update-alternatives` nur setzen, wenn nötig (sendmail → msmtp)
+- Docs: `docs/modules/mail_setup.md`
+
 ### Changed
-- `module_system_update.sh`: Umbau auf **1-Job-Flow** (deterministisch):
+- `modules/module_system_update.sh`: Umbau auf **1-Job-Flow** (deterministisch)
   - 03:30: `apt-get update` → `unattended-upgrade -d` → `apt-get autoremove --purge` → `apt-get autoclean`
   - **Auto-Reboot** nur bei Bedarf um **03:45** (`Automatic-Reboot`, `Automatic-Reboot-Time`, `Automatic-Reboot-WithUsers`)
   - **APT::Periodic vollständig deaktiviert** (`Update-Package-Lists`, `AutocleanInterval`, `Unattended-Upgrade` auf `"0"`)
   - **Keine** `apt-daily*`-Units erzeugen; falls vorhanden, werden sie lediglich deaktiviert
   - Timer deterministisch via Drop-In (`RandomizedDelaySec=0`, `Persistent=true`)
+- Docs: `docs/modules/system_update.md`
 
-### Added
-- Optionale Aufräum-Flags: `CLEAN_DEEP=ja` (zusätzlich `apt-get clean`), `PURGE_RC=ja` (RC-Pakete via `dpkg -P`)
-
-### Docs
-- `docs/modules/system_update.md`: README zum Modul (Ablauf, ENV, Troubleshooting)
+### Security
+- Mail-Modul: keine Klartext-Secrets in `/etc/msmtprc` (Nutzung von `passwordeval`), strikte Rechte (600)
 
 ### Behavior
-- Mail-Reporting nur, wenn `ENABLE_SYSTEM_MAIL=ja` **und** `NOTIFICATION_EMAIL` gesetzt (`MailReport "on-change"`)
+- Mail-Reports nur, wenn `ENABLE_SYSTEM_MAIL=ja` **und** `NOTIFICATION_EMAIL` gesetzt
+- Test-Mail wird nur versendet, wenn der SMTP-Server erreichbar ist
 
 ### Migration
-- Prüfe, ob alte `apt-daily*` Timer aktiv sind und deaktiviere sie bei Bedarf:
+- Prüfe, ob alte `apt-daily*`-Timer aktiv sind und deaktiviere sie bei Bedarf:
   - `systemctl disable --now apt-daily.timer apt-daily-upgrade.timer` (falls vorhanden)
+
 
 
 ## [5.3] - 2025-09-14
