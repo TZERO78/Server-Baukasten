@@ -1,110 +1,95 @@
 # README – Modul: `mail_setup` (msmtp)
 
 ## Zweck
-Richtet **systemweiten E‑Mail‑Versand** über `msmtp` ein und setzt es als `sendmail`‑Alternative. Sichere Dateirechte, einfache Logs, Testversand.
 
----
+Richtet **systemweiten E‑Mail‑Versand** über `msmtp` ein und setzt es als `sendmail`‑Alternative. Konfiguriert Dateirechte, Journald-Logs und führt einen Testversand durch.
 
 ## Voraussetzungen
-- Root‑Rechte
-- Internetzugang zum SMTP‑Server
-- Pakete: `msmtp` (wird außerhalb installiert, z. B. im Install‑Services‑Modul)
 
-Interne Baukasten‑Funktionen: `log_*`, `run_with_spinner`, `backup_and_register`.
-
----
+- **Rechte:** Root-Zugriff für die Ausführung.
+- **Netzwerk:** Internetzugang zum konfigurierten SMTP-Server.
+- **Pakete:** `msmtp`, `ca-certificates` (müssen extern installiert werden).
+- **Baukasten-Funktionen:** `log_*`, `run_with_spinner`, `backup_and_register`.
 
 ## Verhalten
-- Abbruch **ohne** Änderung, wenn `ENABLE_SYSTEM_MAIL != ja`.
-- Validiert: `SMTP_HOST`, `SMTP_FROM`, `NOTIFICATION_EMAIL` (fehlt ⇒ Abbruch mit Fehler).
-- Setzt `msmtp` als `sendmail` via `update-alternatives`.
-- Schreibt `/etc/msmtprc` mit **Rechten 600** (Passwortschutz).
-- Optional Auth je nach `SMTP_AUTH`.
-- Journald‑Tuning: `/etc/systemd/journald.conf.d/99-mail-logging.conf`.
-- Test‑E‑Mail an `NOTIFICATION_EMAIL` (Fehlschlag bricht **nicht** das System‑Setup).
 
----
+- Führt **keine** Aktion aus, wenn `ENABLE_SYSTEM_MAIL` nicht auf `ja` gesetzt ist.
+- **Validiert** alle `SMTP_*`-Variablen; bricht bei fehlenden Pflichtangaben mit Fehler ab.
+- Registriert und setzt `msmtp` als systemweite `sendmail`-Alternative via `update-alternatives`.
+- Schreibt die Konfiguration nach `/etc/msmtprc` mit strikten **Rechten von 600**.
+- Lagert das Passwort in `/etc/msmtp.pass` (ebenfalls `600`) aus, wenn Authentifizierung aktiv ist.
+- Passt die Journald-Konfiguration für längere Log-Aufbewahrung an.
+- Führt einen SMTP-Konnektivitäts-Test durch, bevor eine Test-Mail gesendet wird (TLS-sensitiv; je nach ENV wird `--tls-starttls` bzw. bei Port 465 `--tls` verwendet).
+- Ein Fehlschlag der Test-E-Mail führt nur zu einer Warnung, **bricht aber nicht** das gesamte Setup ab.
 
 ## Konfigurationsvariablen (ENV)
-| Variable | Pflicht | Beispiel | Beschreibung |
-|---|---|---|---|
-| `ENABLE_SYSTEM_MAIL` | ja | `ja` | Modul aktivieren/deaktivieren |
-| `SMTP_HOST` | ja | `smtp.example.com` | SMTP‑Server |
-| `SMTP_PORT` | nein | `587` | Port (Default 25) |
-| `SMTP_FROM` | ja | `server@example.com` | Absender‑Adresse |
-| `NOTIFICATION_EMAIL` | ja | `admin@example.com` | Empfänger für Tests/Reports |
-| `SMTP_AUTH` | nein | `ja`/`nein` | Authentifizierung aktiv |
-| `SMTP_USER` | bei Auth | `user@example.com` | Benutzer |
-| `SMTP_PASSWORD` | bei Auth | `***` | Passwort |
-| `SMTP_TLS_STARTTLS` | nein | `ja`/`nein` | STARTTLS (sonst direkt TLS)
 
----
+| **Variable**           | **Pflicht** | **Beispiel**         | **Beschreibung**                             |
+| ---------------------- | ----------- | -------------------- | -------------------------------------------- |
+| `ENABLE_SYSTEM_MAIL`   | Ja          | `ja`                 | Modul aktivieren/deaktivieren                |
+| `SMTP_HOST`            | Ja          | `smtp.example.com`   | SMTP-Server-Hostname                         |
+| `SMTP_PORT`            | Nein        | `587`                | Port (Standard: 25)                          |
+| `SMTP_FROM`            | Ja          | `server@example.com` | Absender-Adresse                             |
+| `NOTIFICATION_EMAIL`   | Ja          | `admin@example.com`  | Empfänger für Tests/Reports                  |
+| `SMTP_AUTH`            | Nein        | `ja`/`nein`          | Authentifizierung aktiv (Standard: `ja`)     |
+| `SMTP_USER`            | Bei Auth    | `user@example.com`   | Benutzer für die Anmeldung                   |
+| `SMTP_PASSWORD`        | Bei Auth    | `***`                | Passwort für die Anmeldung                   |
+| `SMTP_TLS_STARTTLS`    | Nein        | `ja`/`nein`          | STARTTLS verwenden (Standard: `nein`)        |
+| `MAIL_SETUP_SEND_TEST` | Nein        | `ja`/`nein`          | Test-Mail nach Setup senden (Standard: `ja`) |
 
-## Dateien/Änderungen
-- `/etc/msmtprc` (600, Besitzer `root:root`)
-- `update-alternatives` → `/usr/sbin/sendmail` → `/usr/bin/msmtp`
-- `/etc/systemd/journald.conf.d/99-mail-logging.conf` (persistente Logs, Limits)
+## Dateien & Änderungen
 
----
-
-## Ausführung
-```bash
-module_mail_setup
-```
-
-Bei Erfolg:
-- `sendmail` zeigt auf `msmtp`
-- Test‑Mail wird gesendet (oder Fehlerhinweise im Log)
-
----
+- **Erstellt/Ändert:**
+  - `/etc/msmtprc` (Rechte `600`, Besitzer `root:root`)
+  - `/etc/msmtp.pass` (Rechte `600`, Besitzer `root:root`, nur bei Auth)
+  - `/etc/systemd/journald.conf.d/99-mail-logging.conf`
+- **System-Integration:**
+  - `update-alternatives`: `/usr/sbin/sendmail` wird auf `/usr/bin/msmtp` gesetzt.
 
 ## Verifikation
-```bash
-# sendmail‑Pfad
-update-alternatives --display sendmail | sed -n '1,20p'
 
-# Rechte & Inhalt (nur als root)
-ls -l /etc/msmtprc
-sudo head -n 20 /etc/msmtprc
+```
+# Prüfen, ob die sendmail-Alternative korrekt gesetzt ist
+update-alternatives --display sendmail
 
-# Journald aktiv/persistent?
+# Rechte und Besitzer der Konfigurationsdateien prüfen (nur als root)
+ls -l /etc/msmtprc /etc/msmtp.pass
+
+# Inhalt der Journald-Optimierung prüfen
 cat /etc/systemd/journald.conf.d/99-mail-logging.conf
 
-# Testversand
-printf "Subject: Test\n\nHallo" | sendmail -v "$NOTIFICATION_EMAIL"
-# Logs sichten
-journalctl | grep -i msmtp | tail -n 50
-```
+# Manueller Testversand über die sendmail-Schnittstelle
+printf "Subject: Manueller Test\n\nDies ist ein Test." | sendmail -v "$NOTIFICATION_EMAIL"
 
----
+# Logs des manuellen Versands sichten
+journalctl | grep -i msmtp | tail -n 20
+
+
+```
 
 ## Troubleshooting
-- **Auth‑Fehler**: `SMTP_AUTH=ja`, User/Pass prüfen; Provider blockiert ggf. Port 25.
-- **TLS‑Fehler**: `SMTP_TLS_STARTTLS` passend zum Server setzen; Zert.-Bundle: `/etc/ssl/certs/ca-certificates.crt`.
-- **Keine Mails**: DNS/Firewall prüfen; Logs (`journalctl | grep msmtp`).
-- **Rechteproblem**: `/etc/msmtprc` muss `600` sein.
 
----
+- **Auth-Fehler**: `SMTP_AUTH=ja`, aber User/Pass falsch; SMTP-Provider blockiert ggf. Port 25/587.
+- **TLS-Fehler**: `SMTP_TLS_STARTTLS` passend zum Server setzen; Zertifikats-Bundle (`/etc/ssl/certs/ca-certificates.crt`) prüfen.
+- **Keine Mails**: DNS-Auflösung oder Firewall auf dem Server/Gateway blockiert den Zugriff. Logs prüfen mit `journalctl | grep msmtp`.
+- **Rechteproblem**: `msmtp` bricht ab, wenn `/etc/msmtprc` oder `/etc/msmtp.pass` nicht die Rechte `600` haben.
 
 ## Sicherheit
-- `/etc/msmtprc` enthält Zugangsdaten → **600**.
-- Nur Root hat Leserechte. Keine Weitergabe der Datei in Backups ohne Verschlüsselung.
 
----
+- Das Passwort liegt **nicht** in `/etc/msmtprc`, sondern in `/etc/msmtp.pass` (Klartext) und wird in `/etc/msmtprc` via `passwordeval` referenziert.
+- Beide Dateien enthalten sensible Daten; Rechte **müssen** auf `600` und der Besitzer auf `root:root` gesetzt sein, um unbefugten Zugriff zu verhindern.
+- Diese Dateien sollten aus unverschlüsselten Backups ausgeschlossen werden.
 
-## Entfernen/Rollback
-```bash
-# sendmail‑Alternative zurücksetzen
-update-alternatives --remove sendmail /usr/bin/msmtp || true
+## Entfernen / Rollback
 
-# Konfigs (optional) entfernen
-rm -f /etc/msmtprc
+```
+# sendmail-Alternative sicher entfernen (ignoriert Fehler, wenn nicht vorhanden)
+update-alternatives --remove sendmail /usr/bin/msmtp >/dev/null 2>&1 || true
+
+# Konfigurationsdateien löschen
+rm -f /etc/msmtprc /etc/msmtp.pass
 rm -f /etc/systemd/journald.conf.d/99-mail-logging.conf
+
+# Journald neu starten, um die Konfigurationsänderung zu übernehmen
 systemctl restart systemd-journald
 ```
-
----
-
-## Hinweise
-- Integration mit `unattended‑upgrades`: Mails nur, wenn `ENABLE_SYSTEM_MAIL=ja` **und** `NOTIFICATION_EMAIL` gesetzt.
-- Absender kann im MTA (msmtp‑Option `from`) angepasst werden.
