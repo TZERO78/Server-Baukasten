@@ -5,6 +5,30 @@ Alle wesentlichen Änderungen an diesem Projekt werden in dieser Datei dokumenti
 Das Format basiert auf [Keep a Changelog](https://keepachangelog.com/de/1.0.0/),
 und dieses Projekt folgt [Semantic Versioning](https://semver.org/lang/de/).
 
+## [5.3.1] - 2025-09-21
+
+### Changed
+- `module_system_update.sh`: Umbau auf **1-Job-Flow** (deterministisch):
+  - 03:30: `apt-get update` → `unattended-upgrade -d` → `apt-get autoremove --purge` → `apt-get autoclean`
+  - **Auto-Reboot** nur bei Bedarf um **03:45** (`Automatic-Reboot`, `Automatic-Reboot-Time`, `Automatic-Reboot-WithUsers`)
+  - **APT::Periodic vollständig deaktiviert** (`Update-Package-Lists`, `AutocleanInterval`, `Unattended-Upgrade` auf `"0"`)
+  - **Keine** `apt-daily*`-Units erzeugen; falls vorhanden, werden sie lediglich deaktiviert
+  - Timer deterministisch via Drop-In (`RandomizedDelaySec=0`, `Persistent=true`)
+
+### Added
+- Optionale Aufräum-Flags: `CLEAN_DEEP=ja` (zusätzlich `apt-get clean`), `PURGE_RC=ja` (RC-Pakete via `dpkg -P`)
+
+### Docs
+- `docs/modules/system_update.md`: README zum Modul (Ablauf, ENV, Troubleshooting)
+
+### Behavior
+- Mail-Reporting nur, wenn `ENABLE_SYSTEM_MAIL=ja` **und** `NOTIFICATION_EMAIL` gesetzt (`MailReport "on-change"`)
+
+### Migration
+- Prüfe, ob alte `apt-daily*` Timer aktiv sind und deaktiviere sie bei Bedarf:
+  - `systemctl disable --now apt-daily.timer apt-daily-upgrade.timer` (falls vorhanden)
+
+
 ## [5.3] - 2025-09-14
 
 ### ✨ Hinzugefügt (Added)
