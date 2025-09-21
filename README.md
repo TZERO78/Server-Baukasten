@@ -178,16 +178,24 @@ TAILSCALE_AUTH_KEY=""  # Aus Tailscale Admin Console
 
 ## 📊 Module
 
-Das Skript ist modular aufgebaut:
+Das Skript ist modular aufgebaut. Zu jedem Modul gibt es (oder folgt) eine eigene README unter `docs/modules/`.
 
-| Modul | Beschreibung |
-|-------|--------------|
-| `module_base` | System-Grundkonfiguration |
-| `module_security` | Firewall, SSH, CrowdSec |
-| `module_network` | VPN und Netzwerk |
-| `module_container` | Docker-Installation |
-| `module_geoip` | Länder-basiertes Blocking |
-| `module_verify` | Finale Überprüfung |
+| Modul | Beschreibung | Doku |
+|---|---|---|
+| `module_base` | System-Grundkonfiguration (NTP, Locale, User, Basics) | [docs/modules/base.md](docs/modules/base.md) |
+| `module_security` | Firewall (nftables), SSH-Härtung, CrowdSec | [docs/modules/security.md](docs/modules/security.md) |
+| `module_network` | Netzwerk & VPN (z. B. WireGuard) | [docs/modules/network.md](docs/modules/network.md) |
+| `module_container` | Docker/Moby installieren & Basis-Setup | [docs/modules/container.md](docs/modules/container.md) |
+| `module_deploy_containers` | Container-Stacks deployen (Compose etc.) | [docs/modules/deploy_containers.md](docs/modules/deploy_containers.md) |
+| `module_geoip` | Länderbasiertes Blocking (GeoIP-Sets) | [docs/modules/geoip.md](docs/modules/geoip.md) |
+| `module_install_services` | Basis-Dienste/Tools installieren | [docs/modules/install_services.md](docs/modules/install_services.md) |
+| `module_journald_optimization` | journald persistent + Limits/Rotation | [docs/modules/journald_optimization.md](docs/modules/journald_optimization.md) |
+| `module_kernel_hardening` | Kernel/Sysctl-Härtung | [docs/modules/kernel_hardening.md](docs/modules/kernel_hardening.md) |
+| `module_mail_setup` | Systemweite Mail via msmtp | [docs/modules/mail_setup.md](docs/modules/mail_setup.md) |
+| `module_prepare_install` | Vorbereitungen (Repos, Keys, Checks) | [docs/modules/prepare_install.md](docs/modules/prepare_install.md) |
+| `module_cleanup` | Aufräumen von Altlasten/Paketen | [docs/modules/cleanup.md](docs/modules/cleanup.md) |
+| `module_system_update` | Unattended-Upgrades, 1-Job-Flow, Reboot | [docs/modules/system_update.md](docs/modules/system_update.md) |
+| `module_verify_setup` | Finale Überprüfung/System-Checks | [docs/modules/verify_setup.md](docs/modules/verify_setup.md) |
 
 ## 🛠️ Verwendung
 
