@@ -23,7 +23,7 @@ module_kernel_hardening() {
     command -v sysctl >/dev/null 2>&1 || { log_error "sysctl fehlt"; return 1; }
 
     # Optionale Schalter (ENV)
-    : "${HARDEN_MASK_SERVICES:=nein}"   # ja → mask zusätzlich zu disable
+    : "${HARDEN_MASK_SERVICES:=nein}"   # ja → zusätzlich zu disable auch mask
 
     # ------------------------------------------------------------------
     # Helper: idempotent writer
@@ -52,15 +52,21 @@ module_kernel_hardening() {
 # --- Netzwerk / IPv4 ---
 net.ipv4.conf.all.rp_filter=1
 net.ipv4.conf.default.rp_filter=1
+# (bei asymmetrischem Routing ggf. auf 2 umstellen)
+# net.ipv4.conf.all.rp_filter=2
+# net.ipv4.conf.default.rp_filter=2
 net.ipv4.tcp_syncookies=1
 net.ipv4.conf.all.accept_redirects=0
 net.ipv4.conf.default.accept_redirects=0
-net.ipv4.icmp_echo_ignore_broadcasts=1
-net.ipv4.icmp_ignore_bogus_error_responses=1
-net.ipv4.conf.all.log_martians=1
+net.ipv4.conf.all.accept_source_route=0
+net.ipv4.conf.default.accept_source_route=0
 net.ipv4.conf.all.send_redirects=0
 net.ipv4.conf.default.send_redirects=0
 net.ipv4.conf.all.secure_redirects=0
+net.ipv4.icmp_echo_ignore_broadcasts=1
+net.ipv4.icmp_ignore_bogus_error_responses=1
+net.ipv4.conf.all.log_martians=1
+net.ipv4.conf.default.log_martians=1
 # Optionale Robustheit gegen TIME-WAIT-Attacken
 net.ipv4.tcp_rfc1337=1
 
@@ -69,22 +75,33 @@ net.ipv6.conf.all.accept_redirects=0
 net.ipv6.conf.default.accept_redirects=0
 net.ipv6.conf.all.accept_ra=0
 net.ipv6.conf.default.accept_ra=0
+net.ipv6.conf.all.accept_source_route=0
+net.ipv6.conf.default.accept_source_route=0
+# Optional (Policy-basiert, nur wenn gewünscht):
+# net.ipv6.conf.all.autoconf=0
+# net.ipv6.conf.default.autoconf=0
+# net.ipv6.conf.all.use_tempaddr=0
+# net.ipv6.conf.default.use_tempaddr=0
 
-# --- Forwarding (für Docker/VPN)
+# --- Forwarding (für Docker/VPN) ---
 net.ipv4.ip_forward=1
 net.ipv6.conf.all.forwarding=1
 
 # --- Kernel-Härtung ---
+dev.tty.ldisc_autoload=0
 kernel.dmesg_restrict=1
 kernel.kptr_restrict=2
 kernel.sysrq=0
 kernel.unprivileged_bpf_disabled=1
 net.core.bpf_jit_harden=2
+kernel.core_uses_pid=1
 # Zusätzliche Hardening-Optionen
 kernel.randomize_va_space=2
 kernel.yama.ptrace_scope=1
 # verhindert kexec-basierte Reboots (optional Sicherheitsgewinn)
 kernel.kexec_load_disabled=1
+# Optional (falls unpriv. User-Namespaces NICHT benötigt):
+# kernel.unprivileged_userns_clone=0
 
 # --- FS-Schutz ---
 fs.protected_fifos=2
@@ -139,9 +156,9 @@ EOF
     local services_to_disable=(bluetooth cups avahi-daemon ModemManager wpa_supplicant)
     for svc in "${services_to_disable[@]}"; do
         if systemctl list-unit-files -t service --no-legend | awk '{print $1}' | grep -qx "${svc}.service"; then
-            run_with_spinner "Disable ${svc}" "systemctl disable --now ${svc}.service >/dev/null 2>&1 || true"
+            run_with_spinner "Disable ${svc}" "systemctl disable --now \"${svc}.service\" >/dev/null 2>&1 || true"
             if [ "${HARDEN_MASK_SERVICES}" = "ja" ]; then
-                systemctl mask ${svc}.service >/dev/null 2>&1 || true
+                systemctl mask "${svc}.service" >/dev/null 2>&1 || true
                 log_info "  -> ${svc} zusätzlich maskiert."
             fi
         else

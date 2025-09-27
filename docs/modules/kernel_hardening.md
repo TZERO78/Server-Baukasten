@@ -1,98 +1,86 @@
 # README – Modul: `kernel_hardening` (sysctl & Dienste)
 
 ## Zweck
-Härtet den Kernel und die Netzwerk‑Defaults über `/etc/sysctl.d/` und schaltet unnötige Desktop/Notebook‑Dienste ab. Idempotent: schreibt nur bei Änderungen und lädt sysctl dann neu. Optionales Maskieren von Diensten.
+Härtet Kernel- und Netzwerk-Defaults über `/etc/sysctl.d/` und schaltet unnötige Desktop/Notebook‑Dienste ab. Idempotent: schreibt nur bei Änderungen und lädt dann `sysctl --system`. Optionales Maskieren von Diensten.
 
 ## Voraussetzungen
-- **Root‑Rechte**.
-- **Pakete:** `procps` (für `sysctl` – auf Debian standardmäßig da).
-- **Baukasten‑Funktionen:** `log_*`, `run_with_spinner`, `backup_and_register`.
+- **Root‑Rechte**
+- **Pakete:** `procps` (für `sysctl`)
+- **Baukasten‑Funktionen:** `log_*`, `run_with_spinner`, `backup_and_register`
 
 ## Verhalten
-- Schreibt **eine** Drop‑in‑Datei: `/etc/sysctl.d/99-baukasten-hardening.conf`.
-- Lädt die Parameter mit `sysctl --system`, **nur wenn** sich Inhalte geändert haben.
-- Verifiziert anschließend u. a. `ip_forward` (IPv4/IPv6) und warnt bei Abweichung.
-- Deaktiviert optionale Dienste (falls installiert): `bluetooth`, `cups`, `avahi-daemon`, `ModemManager`, `wpa_supplicant`.
-- Optional: maskiert diese Dienste zusätzlich, wenn `HARDEN_MASK_SERVICES=ja`.
+- Schreibt **eine** Datei: `/etc/sysctl.d/99-baukasten-hardening.conf`
+- Lädt nur bei Änderungen neu (`sysctl --system`) und protokolliert nach `/run/baukasten-sysctl.log`
+- Verifiziert `ip_forward` (v4/v6) und warnt bei Abweichungen
+- Deaktiviert (und optional maskiert) nicht benötigte Dienste: `bluetooth`, `cups`, `avahi-daemon`, `ModemManager`, `wpa_supplicant`
 
 ## Konfigurationsvariablen (ENV)
 | Variable | Pflicht | Beispiel | Wirkung |
 |---|---|---|---|
-| `HARDEN_MASK_SERVICES` | Nein | `ja`/`nein` | Zusätzlich zu `disable` ein `mask` auf die genannten Dienste setzen. Default: `nein` |
+| `HARDEN_MASK_SERVICES` | Nein | `ja`/`nein` | Zusätzlich zu `disable` ein `mask` auf die o. g. Dienste. Default: `nein` |
 
-## Inhalte (`sysctl`‑Parameter – Auszug)
-**Netzwerk/IPv4**
-- `rp_filter=1` (Source‑Validation), `tcp_syncookies=1`
-- `accept_redirects=0`, `send_redirects=0`, `secure_redirects=0`
-- `icmp_echo_ignore_broadcasts=1`, `icmp_ignore_bogus_error_responses=1`
-- Logging: `log_martians=1`
+## Wichtige sysctl‑Einstellungen (Auszug)
+**IPv4**
+- `net.ipv4.conf.*.rp_filter=1` – Source‑Validation (bei asymmetrischem Routing ggf. `2` nutzen)
+- `accept_redirects=0`, `secure_redirects=0`, `send_redirects=0`
+- `accept_source_route=0` (all/default)
+- `log_martians=1` (all & default)
+- `tcp_syncookies=1`, `tcp_rfc1337=1`
 
-**Netzwerk/IPv6**
-- `accept_redirects=0`, `accept_ra=0`
-
-**Forwarding (Server mit Docker/VPN):**
-- `net.ipv4.ip_forward=1`, `net.ipv6.conf.all.forwarding=1`
+**IPv6**
+- `accept_redirects=0` (all/default)
+- `accept_ra=0` (all/default)
+- `accept_source_route=0` (all/default)
+- **Forwarding:** `net.ipv6.conf.all.forwarding=1` (bewusst an für Docker/VPN)
 
 **Kernel‑Hardening**
-- `dmesg_restrict=1`, `kptr_restrict=2`, `sysrq=0`
-- `unprivileged_bpf_disabled=1`, `net.core.bpf_jit_harden=2`
-- `randomize_va_space=2`, `yama.ptrace_scope=1`, `kexec_load_disabled=1`
+- `dev.tty.ldisc_autoload=0`
+- `kernel.dmesg_restrict=1`, `kernel.kptr_restrict=2`, `kernel.sysrq=0`
+- `kernel.unprivileged_bpf_disabled=1`, `net.core.bpf_jit_harden=2`
+- `kernel.core_uses_pid=1`, `kernel.randomize_va_space=2`, `kernel.yama.ptrace_scope=1`
+- Optional: `kernel.kexec_load_disabled=1` (kein kexec‑Reboot)
+- **Nicht gesetzt:** `kernel.modules_disabled` (würde Modulladen global verbieten – auf VPS meist unpraktisch)
 
 **FS‑Schutz**
 - `fs.protected_fifos=2`, `fs.protected_hardlinks=1`, `fs.protected_symlinks=1`, `fs.protected_regular=2`
 
-**Performance (vorsichtig konservativ)**
+**Performance (konservativ, VPS‑tauglich)**
 - `vm.swappiness=10`, `vm.dirty_background_ratio=5`, `vm.dirty_ratio=15`
-- `net.core.{rmem_max,wmem_max}=16777216`, `somaxconn=4096`, `netdev_max_backlog=16384`
+- `net.core.rmem_max/wmem_max=16777216`, `somaxconn=4096`, `netdev_max_backlog=16384`
 - `tcp_fin_timeout=30`, `tcp_keepalive_time=1800`, `tcp_max_syn_backlog=8192`
 - `net.netfilter.nf_conntrack_max=524288` (falls Netfilter aktiv)
 
 ## Dateien & Änderungen
-**Erstellt/Ändert**
-- `/etc/sysctl.d/99-baukasten-hardening.conf` – zentrale Hardening‑Parameter (644, `root:root`).
-
-**Dienste**
-- `systemctl disable --now` auf die o. g. Services (nur wenn vorhanden).
-- Optional: `systemctl mask` bei `HARDEN_MASK_SERVICES=ja`.
+- `/etc/sysctl.d/99-baukasten-hardening.conf` – zentrale Hardening‑Parameter (644, `root:root`)
 
 ## Verifikation
 ```bash
-# Welche Datei wird geladen?
+# Datei gefunden?
 grep -n "baukasten-hardening" /etc/sysctl.d/*.conf
 
-# Kritische Schalter prüfen
-sysctl -n net.ipv4.ip_forward
-sysctl -n net.ipv6.conf.all.forwarding
-sysctl -n kernel.unprivileged_bpf_disabled
-sysctl -n kernel.kptr_restrict
+# Kritische Schalter
+sysctl -n net.ipv4.ip_forward net.ipv6.conf.all.forwarding \
+         kernel.core_uses_pid dev.tty.ldisc_autoload \
+         fs.protected_fifos
 
-# Letztes sysctl-Apply (Log, falls Modul es geschrieben hat)
+# Letztes Apply (Log)
 [ -f /run/baukasten-sysctl.log ] && tail -n +1 /run/baukasten-sysctl.log | sed -n '1,120p'
-
-# Dienste-Status
-systemctl --no-pager --full status bluetooth.service 2>/dev/null | sed -n '1,5p'
 ```
 
 ## Troubleshooting
-- **Asymmetrisches Routing / Policy‑Routing:** `rp_filter=1` kann legitime Pakete verwerfen. In solchen Setups lieber `rp_filter=2` (loose). Quick‑Override:
-  ```bash
-  printf '%s\n' 'net.ipv4.conf.all.rp_filter=2' 'net.ipv4.conf.default.rp_filter=2' \
-    | sudo tee /etc/sysctl.d/50-routing-override.conf && sudo sysctl --system
-  ```
-- **IPv6 RA erwartet (Client‑Netz):** `accept_ra=0` schaltet Router Advertisements ab. Für Client‑Interfaces ggf. Interface‑spezifisch erlauben:
-  ```bash
-  echo 'net.ipv6.conf.eth0.accept_ra=1' | sudo tee /etc/sysctl.d/50-ipv6-ra.conf && sudo sysctl --system
-  ```
-- **`nf_conntrack_max` Warnungen:** Wenn Kernel/Module fehlen, wird der Key ignoriert. Unkritisch; Log prüfen.
-- **Docker/VPN funktioniert nicht:** Prüfe, ob `ip_forward` Werte **1** liefern und Firewall/NAT korrekt gesetzt ist.
+- **Lynis‑Abweichungen:**
+  - `net.ipv4.conf.all.forwarding`: Lynis erwartet `0`. Für Docker/VPN **bewusst 1**. Alternativ interface‑spezifisch aktivieren.
+  - `kernel.modules_disabled`: nicht gesetzt – produktiv meist nicht praktikabel.
+- **Asymmetrisches Routing:** `rp_filter=1` kann Pakete verwerfen → auf `2` wechseln.
+- **IPv6 RA/SLAAC benötigt:** Interface‑spezifisch `accept_ra=1` setzen oder Autokonfig aktivieren.
+- **Fehlende Keys im Log:** Unkritisch (Kernel/Module ggf. nicht vorhanden).
 
 ## Sicherheit
-- Änderungen sind systemweit. Prüfe vor produktivem Einsatz, ob Netzwerk‑Policies (VPN, Overlay, Kubernetes) betroffen sind.
-- `sysrq=0` deaktiviert Notfall‑Tastenkombinationen; auf Headless‑Servern üblich.
+- Änderungen gelten systemweit. Vor Produktivbetrieb prüfen (VPN, Overlay, Kubernetes, Container‑Runtime).
+- `sysrq=0` ist auf Headless‑Servern üblich.
 
 ## Entfernen / Rollback
 ```bash
-# Datei entfernen und Werte neu laden
 sudo rm -f /etc/sysctl.d/99-baukasten-hardening.conf
 sudo sysctl --system
 
@@ -104,6 +92,5 @@ done
 ```
 
 ## Hinweise
-- Das Modul ist **idempotent**: erneutes Ausführen ändert nichts, solange der Inhalt gleich bleibt.
-- Parameterisierung (z. B. `rp_filter`‑Modus, Queue‑Größen) kann bei Bedarf ergänzt werden. Öffne gerne ein Issue/PR mit deinen Anforderungen.
-
+- Modul ist **idempotent**: erneuter Lauf ändert nichts, wenn der Inhalt gleich bleibt.
+- Parametrisierung (z. B. `rp_filter`‑Modus) kann bei Bedarf ergänzt werden. Eröffne ein Issue/PR mit deiner Policy.
