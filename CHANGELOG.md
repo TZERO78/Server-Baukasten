@@ -17,6 +17,11 @@ und dieses Projekt folgt [Semantic Versioning](https://semver.org/lang/de/).
   - Debian 13 nutzt beide Archive-Namenskonventionen (Suite + Codename)
   - Blockierte vorher kritische Pakete wie `libssl3t64`, `openssl`, `linux-image-amd64`
 
+- **ERR-Trap Handling robuster gemacht** - 40 Vorkommen von `((var++))` durch `var=$((var + 1))` ersetzt
+  - Filter-Cases in `handle_error()` an den Anfang verschoben
+  - Verhindert spurious ERR-Trap Triggers bei arithmetischen Operationen
+  - Betrifft 8 Dateien (serverbaukasten.sh, 4 Module, 3 Libs, install.sh)
+
 ### Hinzugefügt (Added)
 - **VERSION-Datei** als Single Source of Truth für Versionsnummer
   - `lib/constants.sh` lädt Version dynamisch aus VERSION-Datei
