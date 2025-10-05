@@ -1,4 +1,4 @@
-# 🏗️ Server-Baukasten v5.3.22
+# 🏗️ Server-Baukasten
 
 [![Version](https://img.shields.io/badge/Version-5.3-blue.svg)](https://github.com/TZERO78/Server-Baukasten/releases)
 [![Lizenz](https://img.shields.io/badge/Lizenz-MIT-green.svg)](https://opensource.org/licenses/MIT)
