@@ -17,6 +17,11 @@ und dieses Projekt folgt [Semantic Versioning](https://semver.org/lang/de/).
   - Debian 13 nutzt beide Archive-Namenskonventionen (Suite + Codename)
   - Blockierte vorher kritische Pakete wie `libssl3t64`, `openssl`, `linux-image-amd64`
 
+### Hinzugefügt (Added)
+- **VERSION-Datei** als Single Source of Truth für Versionsnummer
+  - `lib/constants.sh` lädt Version dynamisch aus VERSION-Datei
+  - `install.sh` lädt Version von GitHub
+
 ### Sicherheit (Security)
 - Automatische Security-Updates funktionieren jetzt korrekt auf Debian 13
 - APT-System vollständig funktionsfähig
