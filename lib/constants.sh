@@ -18,7 +18,13 @@ SCRIPT_DIR="$(cd -- "$(dirname "${BASH_SOURCE[0]}")" && cd .. && pwd -P)"
 # ════════════════════════════════════════════════════════════════
 # SCRIPT-INFORMATIONEN
 # ════════════════════════════════════════════════════════════════
-readonly SCRIPT_VERSION="5.3.1"
+# Version aus VERSION-Datei laden (Single Source of Truth)
+if [ -f "${SCRIPT_DIR}/VERSION" ]; then
+    SCRIPT_VERSION=$(cat "${SCRIPT_DIR}/VERSION" | tr -d '\n\r ')
+else
+    SCRIPT_VERSION="unknown"
+fi
+readonly SCRIPT_VERSION
 readonly SCRIPT_NAME="Server-Baukasten"
 readonly SCRIPT_AUTHOR="Markus F. (TZERO78)"
 

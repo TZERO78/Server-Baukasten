@@ -22,7 +22,14 @@ set -o pipefail
 readonly REPO_URL="https://github.com/TZERO78/Server-Baukasten"
 readonly DEFAULT_BRANCH="main"
 readonly DEFAULT_INSTALL_DIR="./server-baukasten"
-readonly VERSION="4.0.1"
+
+# Version aus GitHub VERSION-Datei laden
+_get_installer_version() {
+    local version
+    version=$(curl -sSL "https://raw.githubusercontent.com/TZERO78/Server-Baukasten/main/VERSION" 2>/dev/null || echo "")
+    [ -n "$version" ] && echo "$version" || echo "latest"
+}
+readonly VERSION=$(_get_installer_version)
 
 # Globale Variablen (können durch Parameter überschrieben werden)
 BRANCH="$DEFAULT_BRANCH"
