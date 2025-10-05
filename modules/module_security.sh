@@ -346,7 +346,7 @@ verify_security_layers() {
         log_ok "Layer 1: NFTables-Service ist aktiv."
     else
         log_error "Layer 1: NFTables-Service ist NICHT aktiv!"
-        ((security_status++))
+        security_status=$((security_status + 1))
     fi
 
     local input_policy=$(nft list chain inet filter input 2>/dev/null | grep "policy" | awk '{print $NF}' | tr -d ';' || echo "unbekannt")
@@ -354,7 +354,7 @@ verify_security_layers() {
         log_ok "Layer 1: Firewall Drop-Policy ist aktiv."
     else
         log_error "Layer 1: Firewall Policy ist NICHT 'drop' (ist: '$input_policy')."
-        ((security_status++))
+        security_status=$((security_status + 1))
     fi
 
     local ssh_port="${SSH_PORT:-22}"
@@ -362,7 +362,7 @@ verify_security_layers() {
         log_ok "Layer 1: SSH-Service ist aktiv auf Port $ssh_port."
     else
         log_error "Layer 1: SSH-Service Problem oder Port $ssh_port nicht erreichbar."
-        ((security_status++))
+        security_status=$((security_status + 1))
     fi
         
     # --- LAYER 2: CROWDSEC IPS ---
@@ -372,14 +372,14 @@ verify_security_layers() {
             log_ok "Layer 2: CrowdSec-Engine ist aktiv."
         else
             log_error "Layer 2: CrowdSec-Engine ist NICHT aktiv!"
-            ((security_status++))
+            security_status=$((security_status + 1))
         fi
         
         if systemctl is-active --quiet crowdsec-bouncer-setonly; then
             log_ok "Layer 2: CrowdSec-Bouncer ist aktiv."
         else
             log_error "Layer 2: CrowdSec-Bouncer ist NICHT aktiv!"
-            ((security_status++))
+            security_status=$((security_status + 1))
         fi
         
         if nft list table ip crowdsec >/dev/null 2>&1; then
@@ -410,7 +410,7 @@ verify_security_layers() {
             
         else
             log_error "Layer 3: GeoIP-Chain fehlt in BASIS-Firewall!"
-            ((security_status++))
+            security_status=$((security_status + 1))
         fi
         
         log_info "         💡 GeoIP-Listen-Update nach Setup: geoip-manager update"
@@ -424,7 +424,7 @@ verify_security_layers() {
         log_ok "Layer 4: SSH-Service ist aktiv."
     else
         log_error "Layer 4: SSH-Service ist NICHT aktiv!"
-        ((security_status++))
+        security_status=$((security_status + 1))
     fi
     
     if grep -q "^PermitRootLogin no" /etc/ssh/sshd_config 2>/dev/null; then
@@ -438,7 +438,7 @@ verify_security_layers() {
         log_ok "Layer 4: AppArmor ist aktiv ($enforced_profiles Profile im enforce mode)."
     else
         log_error "Layer 4: AppArmor ist NICHT aktiv!"
-        ((security_status++))
+        security_status=$((security_status + 1))
     fi
 
     # --- ABSCHLUSS-BEWERTUNG ---

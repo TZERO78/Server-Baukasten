@@ -215,13 +215,13 @@ validate_config() {
       val="${!var:-}"
       if [ -z "$val" ]; then
         log_error "Fehlende Variable: '$var'"
-        ((errors++))
+        errors=$((errors + 1))
         continue
       fi
       if [ "$validator" != ":" ] && ! "$validator" "$val"; then
         shown="$val"; is_secret_var "$var" && shown="***redacted***"
         log_error "$msg (Wert war: '$shown')"
-        ((errors++))
+        errors=$((errors + 1))
       fi
     fi
   done

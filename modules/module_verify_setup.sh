@@ -45,7 +45,7 @@ module_verify_setup() {
             log_ok "    ✅ $service läuft"
         else
             log_error "    ❌ $service läuft NICHT (KRITISCH)!"
-            ((failed_critical++))
+            failed_critical=$((failed_critical + 1))
         fi
     done
     
@@ -67,10 +67,10 @@ module_verify_setup() {
         log_ok "    🎉 Firewall-Architektur: VOLLSTÄNDIG FUNKTIONAL"
     elif [ $base_firewall_status -eq 0 ]; then
         log_warn "    ⚠️ Firewall-Architektur: BASIS OK, Erweiterungen unvollständig"
-        ((failed_important++))
+        failed_important=$((failed_important + 1))
     else
         log_error "    ❌ Firewall-Architektur: BASIS-PROBLEME erkannt!"
-        ((failed_critical++))
+        failed_critical=$((failed_critical + 1))
     fi
 
     # ═══════════════════════════════════════════════════════════════════════════
@@ -83,7 +83,7 @@ module_verify_setup() {
                 log_ok "    ✅ $service läuft"
             else
                 log_warn "    ❌ $service läuft NICHT (Wichtig für Sicherheit/Funktion)"
-                ((failed_important++))
+                failed_important=$((failed_important + 1))
             fi
         done
     else
@@ -101,7 +101,7 @@ module_verify_setup() {
         log_ok "    ✅ sudo-System ist sicher konfiguriert"
     else
         log_error "    ❌ sudo-System hat Sicherheitsprobleme!"
-        ((failed_critical++))
+        failed_critical=$((failed_critical + 1))
     fi
 
     # ═══════════════════════════════════════════════════════════════════════════
@@ -115,7 +115,7 @@ module_verify_setup() {
         log_ok "    ✅ Netzwerk-Konnektivität vollständig"
     else
         log_warn "    ⚠️ Netzwerk hat kleinere Probleme"
-        ((failed_important++))
+        failed_important=$((failed_important + 1))
     fi
 
     # ═══════════════════════════════════════════════════════════════════════════
@@ -128,7 +128,7 @@ module_verify_setup() {
                 log_ok "    ✅ $service ist aktiv"
             else
                 log_info "    ❌ $service ist inaktiv (Optional)"
-                ((failed_optional++))
+                failed_optional=$((failed_optional + 1))
             fi
         done
     else
@@ -252,7 +252,7 @@ verify_base_firewall_architecture() {
     # 1. NFTables-Service
     if ! systemctl is-active --quiet nftables; then
         log_error "      ❌ NFTables-Service nicht aktiv"
-        ((base_errors++))
+        base_errors=$((base_errors + 1))
         return $base_errors
     fi
     
@@ -265,7 +265,7 @@ verify_base_firewall_architecture() {
             log_debug "      ✅ Tabelle '$table' existiert"
         else
             log_error "      ❌ Tabelle '$table' fehlt!"
-            ((base_errors++))
+            base_errors=$((base_errors + 1))
         fi
     done
     
@@ -277,7 +277,7 @@ verify_base_firewall_architecture() {
         log_ok "      ✅ Input-Policy: drop (sicher)"
     else
         log_error "      ❌ Input-Policy: '$input_policy' (sollte 'drop' sein)!"
-        ((base_errors++))
+        base_errors=$((base_errors + 1))
     fi
     
     # 4. GeoIP-Integration (falls aktiviert)
@@ -291,7 +291,7 @@ verify_base_firewall_architecture() {
             
             for set in "${geoip_sets[@]}"; do
                 if ! sudo nft list set inet filter "$set" >/dev/null 2>&1; then
-                    ((missing_sets++))
+                    missing_sets=$((missing_sets + 1))
                 fi
             done
             
@@ -302,7 +302,7 @@ verify_base_firewall_architecture() {
             fi
         else
             log_error "      ❌ GeoIP-Chain fehlt (aber GeoIP ist aktiviert)!"
-            ((base_errors++))
+            base_errors=$((base_errors + 1))
         fi
     fi
     
@@ -473,7 +473,7 @@ verify_sudo_security_status() {
         for file in "${temp_sudo_files[@]}"; do
             if grep -q "NOPASSWD" "$file" 2>/dev/null; then
                 log_error "        ❌ $(basename "$file") - enthält NOPASSWD (SICHERHEITSRISIKO!)"
-                ((sudo_issues++))
+                sudo_issues=$((sudo_issues + 1))
             else
                 log_info "        ✅ $(basename "$file") - OK (kein NOPASSWD)"
             fi
@@ -487,7 +487,7 @@ verify_sudo_security_status() {
         if [ -f "/etc/sudoers.d/50-$ADMIN_USER" ]; then
             if grep -q "NOPASSWD" "/etc/sudoers.d/50-$ADMIN_USER" 2>/dev/null; then
                 log_error "      ❌ SICHERHEITSPROBLEM: '$ADMIN_USER' hat noch NOPASSWD-Rechte!"
-                ((sudo_issues++))
+                sudo_issues=$((sudo_issues + 1))
             else
                 log_ok "      ✅ '$ADMIN_USER' hat sichere sudo-Rechte (mit Passwort)"
             fi
@@ -500,7 +500,7 @@ verify_sudo_security_status() {
             log_ok "      ✅ '$ADMIN_USER' hat funktionsfähige sudo-Berechtigung"
         else
             log_error "      ❌ '$ADMIN_USER' hat KEINE sudo-Berechtigung!"
-            ((sudo_issues++))
+            sudo_issues=$((sudo_issues + 1))
         fi
     fi
     
@@ -509,7 +509,7 @@ verify_sudo_security_status() {
         log_ok "      ✅ sudoers-System ist konsistent"
     else
         log_error "      ❌ sudoers-System hat SYNTAXFEHLER!"
-        ((sudo_issues++))
+        sudo_issues=$((sudo_issues + 1))
     fi
     
     return $sudo_issues
@@ -527,7 +527,7 @@ verify_network_connectivity() {
         log_ok "      ✅ SSH-Port $ssh_port ist gebunden und erreichbar"
     else
         log_error "      ❌ SSH-Port $ssh_port ist NICHT erreichbar!"
-        ((network_issues++))
+        network_issues=$((network_issues + 1))
     fi
     
     # 2. Primäres Interface
@@ -542,7 +542,7 @@ verify_network_connectivity() {
             fi
         else
             log_error "      ❌ Primäres Interface '${PRIMARY_INTERFACE}' nicht gefunden!"
-            ((network_issues++))
+            network_issues=$((network_issues + 1))
         fi
     fi
     
@@ -555,11 +555,11 @@ verify_network_connectivity() {
                 log_ok "      ✅ Tailscale VPN verbunden (IP: ${tailscale_ip:-keine IPv4})"
             else
                 log_error "      ❌ Tailscale VPN nicht verbunden oder nicht authentifiziert!"
-                ((network_issues++))
+                network_issues=$((network_issues + 1))
             fi
         else
             log_error "      ❌ Tailscale nicht installiert (aber VPN-Modell konfiguriert)!"
-            ((network_issues++))
+            network_issues=$((network_issues + 1))
         fi
     fi
     
@@ -571,7 +571,7 @@ verify_network_connectivity() {
             log_ok "      ✅ Docker-Bridge aktiv (Gateway: ${docker_ip:-unbekannt})"
         else
             log_error "      ❌ Docker-Bridge 'docker0' nicht gefunden!"
-            ((network_issues++))
+            network_issues=$((network_issues + 1))
         fi
     fi
     

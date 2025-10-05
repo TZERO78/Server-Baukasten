@@ -331,7 +331,7 @@ set_file_permissions() {
         for component in "$INSTALL_DIR/components"/*; do
             [ -f "$component" ] || continue
             chmod 750 "$component"
-            ((component_count++))
+            component_count=$((component_count + 1))
         done
         log_ok "     ✅ $component_count Components ausführbar (750)"
     fi

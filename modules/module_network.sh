@@ -147,7 +147,7 @@ setup_tailscale() {
     
     while [ $wait_time -lt $max_wait ]; do
         sleep 1
-        ((wait_time++))
+        wait_time=$((wait_time + 1))
         
         # Prüfe ob Tailscale verbunden ist
         if tailscale status >/dev/null 2>&1 && ! tailscale status 2>/dev/null | grep -q "Logged out"; then

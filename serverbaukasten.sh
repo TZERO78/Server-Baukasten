@@ -58,17 +58,21 @@ handle_error() {
     local line_number=$2 
     local failed_command=$3
     
-    # Permanente Debug-Ausgabe
+    # Filter ZUERST prüfen (vor allen Ausgaben!)
+    case "$failed_command" in
+        *'(('*'))'*|*'$((*))'*)
+            # Harmlose arithmetische Operation - silent ignore
+            return 0
+            ;;
+    esac
+    
+    # Debug-Ausgaben erst NACH dem Filter
     echo "DEBUG: ERR-Trap ausgelöst!"
     echo "  Exit-Code: $exit_code"
     echo "  Zeile: $line_number"  
     echo "  Befehl: '$failed_command'"
     
     case "$failed_command" in
-        *'(('*'))'*|*'$((*))'*)
-            log_debug "Harmlose arithmetische Operation ignoriert: $failed_command"
-            return 0
-            ;;
         *"systemctl"*|*"apt"*|*"curl"*|*"wget"*|*"cp "*|*"mv "*|*"rm "*|*"mkdir"*)
             log_error "Kritischer Systemfehler in Zeile $line_number: $failed_command"
             rollback  # ✅ WIEDER HINZUGEFÜGT

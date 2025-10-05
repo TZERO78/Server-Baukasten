@@ -355,11 +355,11 @@ cleanup_all_temporary_sudo_entries() {
     for pattern in "99-temp-*" "99-*-temp-*" "*-temporary-*"; do
         find /etc/sudoers.d/ -name "$pattern" -type f 2>/dev/null | while read -r file; do
             log_info "  🗑️ Entferne temporäre sudo-Datei: $(basename "$file")"
-            rm -f "$file"; ((cleaned++))
+            rm -f "$file"; cleaned=$((cleaned + 1))
         done
     done
     find /etc/sudoers.d/ -name "99-*" -type f 2>/dev/null | while read -r file; do
-        grep -q "NOPASSWD" "$file" 2>/dev/null && { log_info "  🗑️ Entferne Legacy-NOPASSWD-Datei: $(basename "$file")"; rm -f "$file"; ((cleaned++)); }
+        grep -q "NOPASSWD" "$file" 2>/dev/null && { log_info "  🗑️ Entferne Legacy-NOPASSWD-Datei: $(basename "$file")"; rm -f "$file"; cleaned=$((cleaned + 1)); }
     done
 
     [ $cleaned -gt 0 ] && log_ok "$cleaned temporäre sudo-Dateien bereinigt." || log_info "Keine temporären sudo-Dateien gefunden."

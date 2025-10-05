@@ -207,13 +207,13 @@ show_summary() {
     # Durchlaufe alle gefundenen Timer
     while read -r timer_name; do
         if [ -n "$timer_name" ]; then
-            ((total_count++))
+            total_count=$((total_count + 1))
             
             # Timer-Name formatieren (ohne .timer, Bindestriche zu Leerzeichen)
             local display_name=$(echo "$timer_name" | sed 's/\.timer$//' | sed 's/-/ /g')
             
             if systemctl is-active --quiet "$timer_name" 2>/dev/null; then
-                ((active_count++))
+                active_count=$((active_count + 1))
                 local next_run=$(systemctl list-timers "$timer_name" --no-pager 2>/dev/null | grep "$timer_name" | awk '{print $1, $2}' | head -1 || echo "Unbekannt")
                 print_summary_entry "$display_name" "✅ Aktiv (Nächster: $next_run)"
             else
