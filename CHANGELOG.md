@@ -5,6 +5,31 @@ Alle wesentlichen Änderungen an diesem Projekt werden in dieser Datei dokumenti
 Das Format basiert auf [Keep a Changelog](https://keepachangelog.com/de/1.0.0/),
 und dieses Projekt folgt [Semantic Versioning](https://semver.org/lang/de/).
 
+## [5.3.2] - 2025-10-05
+
+### Behoben (Fixed)
+- **KRITISCH: APT::Default-Release Regex-Bug** - Funktion `ensure_default_release_regex()` komplett entfernt (`lib/apt_repair_helpers.sh`)
+  - Verhinderte APT-Funktionalität auf Debian 13 durch ungültige Regex-Werte
+  - Datei `/etc/apt/apt.conf.d/00-default-release` wird nicht mehr erstellt
+  
+- **KRITISCH: Unattended-upgrades blockierte alle Security-Updates auf Debian 13** (`modules/module_system_update.sh`)
+  - Allowed-Origins um `stable-security` und `stable-updates` erweitert
+  - Debian 13 nutzt beide Archive-Namenskonventionen (Suite + Codename)
+  - Blockierte vorher kritische Pakete wie `libssl3t64`, `openssl`, `linux-image-amd64`
+
+### Sicherheit (Security)
+- Automatische Security-Updates funktionieren jetzt korrekt auf Debian 13
+- APT-System vollständig funktionsfähig
+
+### Kompatibilität
+- Debian 13 (Trixie) - vollständig getestet
+- Debian 12/11 - abwärtskompatibel
+
+### Weitere Informationen
+- Detaillierte Bug-Beschreibung und Workaround: GitHub Issue #[4]
+- Tested on: Debian 13.1 (Trixie), IONOS VPS
+- Reported by: @TZERO78
+
 ## [5.3.1] - 2025-09-21
 
 ### Changed
