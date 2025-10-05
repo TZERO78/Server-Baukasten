@@ -42,10 +42,12 @@ module_system_update() {
     # =================== 1/3: unattended-upgrades konfigurieren =================
     log_info "  -> 1/3: Konfiguriere unattended-upgrades…"
 
-    local allowed_origins='      "\${distro_id}:\${distro_codename}-security";'
+    local allowed_origins='      "\${distro_id}:\${distro_codename}-security";
+      "\${distro_id}:stable-security";'
     if [ "$UPGRADE_EXTENDED" = "ja" ]; then
         allowed_origins="${allowed_origins}
-      \"\${distro_id}:\${distro_codename}-updates\";"
+      \"\${distro_id}:\${distro_codename}-updates\";
+      \"\${distro_id}:stable-updates\";"
     fi
 
     # Mail-Block nur, wenn global aktiviert und Ziel gesetzt (Mail-Modul kümmert sich)

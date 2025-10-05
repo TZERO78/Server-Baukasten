@@ -157,45 +157,6 @@ EOF
   esac
 }
 
-# ------------------- Default-Release (Regex, robust) -------------------------
-# Setzt APT::Default-Release (Regex), basierend auf den tatsächlich
-# vorhandenen Archiven (a=...) für den gewünschten Codename (n=...).
-ensure_default_release_regex() {
-  local codename="$1" conf="/etc/apt/apt.conf.d/00-default-release"
-
-  # 1) Primär aus policy (a= … für n=<codename>)
-  local archives; archives="$(get_archives_for_codename "$codename" || true)"
-
-  # 2) Wenn leer: heuristisch aus apt-cache policy ableiten
-  if [ -z "$archives" ]; then
-    # Versuche a= direkt neben n=<codename> mit sed rauszuziehen
-    local guess
-    guess="$(apt-cache policy 2>/dev/null \
-      | sed -n "/n=${codename}[, ]/ s/.*a=\([^, ]*\).*/\1/p" \
-      | sort -u)"
-    if [ -n "$guess" ]; then
-      archives="$(printf '%s\n%s\n%s\n' "$guess" "${guess}-updates" "${guess}-security")"
-    fi
-  fi
-
-  # 3) Als letzte Rückfallebene: nur Codename selbst
-  [ -n "$archives" ] || archives="$codename"
-
-  # 4) Patternliste ohne Leerzeilen/CRs & ohne trailing '|'
-  local patlist
-  patlist="$(
-    printf '%s' "$archives" | tr -d '\r' | sed '/^[[:space:]]*$/d' | paste -sd'|' -
-  )"
-
-  # Alte Einträge weg, neuen schreiben
-  grep -Rl --null 'APT::Default-Release' /etc/apt 2>/dev/null \
-    | xargs -0 -r sed -i -E '/APT::Default-Release/d'
-  printf 'APT::Default-Release "/^(%s)$/";\n' "$patlist" > "$conf"
-
-  log_info  "  -> Default-Release gesetzt auf Regex: /^(${patlist})$/"
-  log_debug "    - geschrieben nach: $conf"
-}
-
 # --------------------------- Update mit Retry --------------------------------
 apt_update_with_retry() {
   local tries=0
@@ -237,9 +198,6 @@ fix_apt_sources_universal() {
 
   apt_wait_for_locks
 
-  # Default-Release: Regex passend zu vorhandenen a=… für n=<codename>
-  ensure_default_release_regex "$os_code"
-
   # Update testen
   if ! apt_update_with_retry; then
     log_error "❌ APT-Reparatur fehlgeschlagen (update)"
@@ -277,9 +235,7 @@ install_packages_safe() {
   done
   [ ${#missing[@]} -gt 0 ] || { log_ok "Alle gewünschten Pakete sind bereits installiert."; return 0; }
 
-  # Release/Locks wie gehabt
-  local _id _ver _code; read -r _id _ver _code <<<"$(detect_os_version)"
-  ensure_default_release_regex "$_code"
+  # Locks prüfen
   apt_wait_for_locks
 
   log_info "Installiere Pakete: ${missing[*]}"
