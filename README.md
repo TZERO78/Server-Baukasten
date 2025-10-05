@@ -1,13 +1,10 @@
 # 🏗️ Server-Baukasten
 
 <!-- Badges -->
-[![GitHub Release](https://img.shields.io/github/v/release/TZERO78/Server-Baukasten?label=Version)](https://github.com/TZERO78/Server-Baukasten/releases)
-[![GitHub Tag](https://img.shields.io/github/v/tag/TZERO78/Server-Baukasten?label=Latest%20Tag)](https://github.com/TZERO78/Server-Baukasten/tags)
-[![License](https://img.shields.io/github/license/TZERO78/Server-Baukasten?label=Lizenz)](LICENSE)
+[![Release](https://img.shields.io/github/v/release/TZERO78/Server-Baukasten?include_prereleases=false)](https://github.com/TZERO78/Server-Baukasten/releases)
+[![License](https://img.shields.io/github/license/TZERO78/Server-Baukasten)](LICENSE)
 [![Debian](https://img.shields.io/badge/Debian-12%20|%2013-red?logo=debian)](https://www.debian.org)
-[![Last Commit](https://img.shields.io/github/last-commit/TZERO78/Server-Baukasten?label=Letzter%20Commit)](https://github.com/TZERO78/Server-Baukasten/commits/main)
-[![GitHub Issues](https://img.shields.io/github/issues/TZERO78/Server-Baukasten?label=Issues)](https://github.com/TZERO78/Server-Baukasten/issues)
-[![GitHub Stars](https://img.shields.io/github/stars/TZERO78/Server-Baukasten?style=social)](https://github.com/TZERO78/Server-Baukasten/stargazers)
+[![Last Commit](https://img.shields.io/github/last-commit/TZERO78/Server-Baukasten)](https://github.com/TZERO78/Server-Baukasten/commits/main)
 
 Vollautomatische Härtung und Konfiguration für Debian- und Ubuntu-Server nach modernen, praxiserprobten Sicherheitsstandards. **Erfolgreich auf Debian 12 (Bookworm) und dem kommenden Debian 13 (Trixie) getestet.**
 
