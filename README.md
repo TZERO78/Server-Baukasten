@@ -1,7 +1,7 @@
 # 🏗️ Server-Baukasten
 
 <!-- Badges -->
-[[![Release](https://img.shields.io/github/v/release/TZERO78/Server-Baukasten?include_prereleases=false)](https://github.com/TZERO78/Server-Baukasten/releases)](https://img.shields.io/github/v/release/TZERO78/Server-Baukasten?include_prereleases=false&sort=semver)
+[![Release](https://img.shields.io/github/v/release/TZERO78/Server-Baukasten?include_prereleases=false)](https://github.com/TZERO78/Server-Baukasten/releases)
 [![License](https://img.shields.io/github/license/TZERO78/Server-Baukasten)](LICENSE)
 [![Debian](https://img.shields.io/badge/Debian-12%20|%2013-red?logo=debian)](https://www.debian.org)
 [![Last Commit](https://img.shields.io/github/last-commit/TZERO78/Server-Baukasten)](https://github.com/TZERO78/Server-Baukasten/commits/main)
