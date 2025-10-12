@@ -196,7 +196,7 @@ Das Skript ist modular aufgebaut. Zu jedem Modul gibt es (oder folgt) eine eigen
 | `module_mail_setup` | Systemweite Mail via msmtp | [docs/modules/mail_setup.md](docs/modules/mail_setup.md) |
 | `module_prepare_install` | Vorbereitungen (Repos, Keys, Checks) | [docs/modules/prepare_install.md](docs/modules/prepare_install.md) |
 | `module_cleanup` | Aufräumen von Altlasten/Paketen | [docs/modules/cleanup.md](docs/modules/cleanup.md) |
-| `module_system_update` | Unattended-Upgrades, 1-Job-Flow, Reboot | [docs/modules/system_update.md](docs/modules/system_update.md) |
+| `module_system_update` | Templatebasierte unattended-upgrades (Debian 12/13) | [docs/modules/system_update.md](docs/modules/system_update.md) |
 | `module_verify_setup` | Finale Überprüfung/System-Checks | [docs/modules/verify_setup.md](docs/modules/verify_setup.md) |
 
 ## 🛠️ Verwendung
