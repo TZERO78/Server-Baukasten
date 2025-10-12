@@ -1,0 +1,4 @@
+// APT Periodic – deaktiviert; Listen & Cleanup übernimmt unser Service
+APT::Periodic::Update-Package-Lists "0";
+APT::Periodic::AutocleanInterval "0";
+APT::Periodic::Unattended-Upgrade "0";
