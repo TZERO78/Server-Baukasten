@@ -40,10 +40,10 @@ readonly NOTIFICATION_EMAIL_DEFAULT="admin@example.com"
 # REPOSITORY-URLS (GITHUB)
 # ════════════════════════════════════════════════════════════════
 readonly COMPONENTS_BASE_URL="https://raw.githubusercontent.com/TZERO78/Server-Baukasten/main/components"
-readonly CONF_BASE_URL="https://raw.githubusercontent.com/TZERO78/Server-Baukasten/main/conf"
+readonly TEMPLATES_BASE_URL="https://raw.githubusercontent.com/TZERO78/Server-Baukasten/main/templates"
 
 # Wenn Child-Prozesse sie brauchen:
-# export COMPONENTS_BASE_URL CONF_BASE_URL
+# export COMPONENTS_BASE_URL TEMPLATES_BASE_URL
 
 # ════════════════════════════════════════════════════════════════
 # PROJEKT-PFADE (RELATIV ZUM SKRIPT)
@@ -51,7 +51,7 @@ readonly CONF_BASE_URL="https://raw.githubusercontent.com/TZERO78/Server-Baukast
 readonly LIB_DIR="${SCRIPT_DIR}/lib"
 readonly MODULES_DIR="${SCRIPT_DIR}/modules"
 readonly COMP_DIR="${SCRIPT_DIR}/components"
-readonly TEMPLATE_DIR="${SCRIPT_DIR}/conf"
+readonly TEMPLATE_DIR="${SCRIPT_DIR}/templates"
 
 # ════════════════════════════════════════════════════════════════
 # SYSTEM-PFADE (ABSOLUT)

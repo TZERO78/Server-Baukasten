@@ -192,3 +192,16 @@ is_choice_1_2() { [[ "$1" =~ ^[12]$ ]]; }
 ## return int 0=gültig, 1=ungültig  
 is_yes_no() { [[ "$1" =~ ^(ja|nein)$ ]]; }
 
+## Prüft, ob Zeit im Format HH:MM:SS gültig ist
+## param string $1 Die zu prüfende Zeit (z.B. "03:30:00")
+## return int 0=gültig, 1=ungültig
+is_valid_time() {
+    [[ "$1" =~ ^([01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]$ ]]
+}
+
+## Prüft, ob Zeit im Format HH:MM gültig ist  
+## param string $1 Die zu prüfende Zeit (z.B. "03:45")
+## return int 0=gültig, 1=ungültig
+is_valid_time_hhmm() {
+    [[ "$1" =~ ^([01][0-9]|2[0-3]):[0-5][0-9]$ ]]
+}

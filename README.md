@@ -1,360 +1,364 @@
 # 🏗️ Server-Baukasten
 
+> 🇩🇪 **[Deutsche Dokumentation / German Documentation](docs/de/README.md)**
+
 <!-- Badges -->
 [![Release](https://img.shields.io/github/v/release/TZERO78/Server-Baukasten)](https://github.com/TZERO78/Server-Baukasten/releases)
 [![License](https://img.shields.io/github/license/TZERO78/Server-Baukasten)](LICENSE)
 [![Debian](https://img.shields.io/badge/Debian-12%20|%2013-red?logo=debian)](https://www.debian.org)
 [![Last Commit](https://img.shields.io/github/last-commit/TZERO78/Server-Baukasten)](https://github.com/TZERO78/Server-Baukasten/commits/main)
 
-Vollautomatische Härtung und Konfiguration für Debian- und Ubuntu-Server nach modernen, praxiserprobten Sicherheitsstandards. **Erfolgreich auf Debian 12 (Bookworm) und dem kommenden Debian 13 (Trixie) getestet.**
+Fully automated hardening and configuration for Debian and Ubuntu servers according to modern, battle-tested security standards. **Successfully tested on Debian 12 (Bookworm) and the upcoming Debian 13 (Trixie).**
 
-**Modulares Server-Hardening für Linux mit NFTables, CrowdSec, GeoIP-Blocking und Docker-Integration.**
+**Modular server hardening for Linux with NFTables, CrowdSec, GeoIP blocking, and Docker integration.**
 
-Pragmatisches Starter-Hardening für Home-Server & kleine VPS. Ein Bash-Skript das einen frischen Debian/Ubuntu-Server in ~20 Minuten mit einer konfigurierbaren Sicherheitsarchitektur ausstattet.
+Pragmatic starter hardening for home servers & small VPS. A Bash script that equips a fresh Debian/Ubuntu server with a configurable security architecture in ~20 minutes.
 
-## Warum Bash statt Ansible/Puppet?
+## Why Bash instead of Ansible/Puppet?
 
-Bewusste Entscheidung für Einfachheit:
+Conscious decision for simplicity:
 
-- **Keine Dependencies:** Läuft sofort auf jedem Standard-Server
-- **Vollständig transparent:** Jede Zeile Code ist nachvollziehbar
-- **Zielgruppe:** Home-User und VPS-Bastler, nicht Enterprise-Admins
-- **Lerneffekt:** Du siehst genau, was konfiguriert wird
-- **Portabilität:** Funktioniert überall wo Bash verfügbar ist
+- **No Dependencies:** Runs immediately on any standard server
+- **Fully transparent:** Every line of code is comprehensible
+- **Target audience:** Home users and VPS tinkerers, not enterprise admins
+- **Learning effect:** You see exactly what gets configured
+- **Portability:** Works anywhere Bash is available
 
-Ansible ist technisch "sauberer", aber für die Zielgruppe überdimensioniert. Dieses Script soll schnell und verständlich sein, nicht perfekt.
+Ansible is technically "cleaner," but oversized for the target audience. This script is meant to be fast and understandable, not perfect.
 
-## 📐 Konzept
+## 📐 Concept
 
-Der Server-Baukasten ist ein pragmatisches Starter-Tool mit drei Grundprinzipien:
+The Server-Baukasten is a pragmatic starter tool with three core principles:
 
-### 1. Solides Sicherheitsfundament
-Das Script implementiert mehrere Basisschutz-Schichten: NFTables-Firewall, CrowdSec IPS, GeoIP-Blocking und Kernel-Härtung (soweit auf VPS möglich - keine Kernel-Module oder Dateisystem-Änderungen). Es ist kein vollständiges Enterprise-System, sondern bietet eine sichere Ausgangsbasis für eigene Projekte.
+### 1. Solid Security Foundation
+The script implements multiple baseline protection layers: NFTables firewall, CrowdSec IPS, GeoIP blocking, and kernel hardening (as far as possible on VPS - no kernel modules or filesystem changes). It's not a complete enterprise system, but provides a secure starting point for your own projects.
 
-### 2. Einfachheit vor Perfektion
-Bewusst als simples Bash-Script entwickelt - transparent, nachvollziehbar, ohne externe Dependencies. Der Code wurde mit Hilfe von KI ausführlich kommentiert und dokumentiert. Du behältst die volle Kontrolle und verstehst jeden Schritt.
+### 2. Simplicity over Perfection
+Deliberately developed as a simple Bash script - transparent, comprehensible, without external dependencies. The code has been extensively commented and documented with the help of AI. You retain full control and understand every step.
 
-### 3. Reproduzierbares Setup
-Server-Konfiguration über Config-File. Ermöglicht identische, gehärtete Server-Setups - einmal für die virtuelle Maschine zum Testen und zweitens am echten VPS für die Produktion. Das Script ist noch nicht vollständig idempotent - dies wird nach und nach verbessert.
+### 3. Reproducible Setup
+Server configuration via config file. Enables identical, hardened server setups - once for the virtual machine for testing and secondly on the real VPS for production. The script is not yet fully idempotent - this will be improved gradually.
 
-### 4. Moderne Technologie-Entscheidungen
-Bewusst auf aktuelle Standards gesetzt statt auf Legacy-Tools:
-- **NFTables** statt iptables (moderne Packet-Filterung)
-- **CrowdSec** statt Fail2ban (Community-basierte Threat Intelligence)
-- **systemd-timer** statt cron (bessere Integration und Logging)
-- **journald** statt logrotate (strukturiertes Logging mit automatischer Rotation)
-- **Docker** mit iptables-nft Backend (Hybrid-Lösung für Kompatibilität)
+### 4. Modern Technology Decisions
+Deliberately chose current standards instead of legacy tools:
+- **NFTables** instead of iptables (modern packet filtering)
+- **CrowdSec** instead of Fail2ban (community-based threat intelligence)
+- **systemd-timer** instead of cron (better integration and logging)
+- **journald** instead of logrotate (structured logging with automatic rotation)
+- **Docker** with iptables-nft backend (hybrid solution for compatibility)
 
-Pragmatischer Mix bei Sicherheitstools:
-- **AIDE & RKHunter** bleiben im Einsatz, da moderne Alternativen (OSSEC, Wazuh) eigene Datenbanken benötigen und für Home-Server überdimensioniert sind
-- **AppArmor** als bewährtes MAC-System - einfacher als SELinux, effektiver als nichts
+Pragmatic mix for security tools:
+- **AIDE & RKHunter** remain in use, as modern alternatives (OSSEC, Wazuh) require their own databases and are oversized for home servers
+- **AppArmor** as proven MAC system - simpler than SELinux, more effective than nothing
 
-## ⚠️ Was es NICHT ist
+## ⚠️ What it is NOT
 
-Eine vollautomatische Enterprise-Lösung. Es schafft das sichere Fundament - für spezifische Services musst du selbst Hand anlegen. Du kannst das Script jederzeit auf deine Bedürfnisse anpassen.
+A fully automatic enterprise solution. It creates the secure foundation - for specific services you need to work manually. You can adapt the script to your needs at any time.
 
-**Hinweis:** Das Script ist nicht perfekt und hat mit Sicherheit an der einen oder anderen Stelle noch kleine Bugs, die ich natürlich versuche zu beheben! Feedback und Bug-Reports sind immer willkommen.
+**Note:** The script is not perfect and certainly has small bugs here and there that I'm naturally trying to fix! Feedback and bug reports are always welcome.
 
-## 🎯 Ziel
+## 🎯 Goal
 
-Automatisierte Einrichtung eines sicheren, produktionsbereiten Linux-Servers mit:
+Automated setup of a secure, production-ready Linux server with:
 
-- Gehärteter Firewall (NFTables)
+- Hardened firewall (NFTables)
 - Intrusion Prevention System (CrowdSec)
-- Container-Support (Docker)
-- VPN-Integration (Tailscale)
-- GeoIP-Blocking
-- Automatischen Sicherheitsupdates
+- Container support (Docker)
+- VPN integration (Tailscale)
+- GeoIP blocking
+- Automatic security updates
 
 ## ✨ Features
 
-### Sicherheit
-- **NFTables Firewall** mit dynamischer Regel-Verwaltung
-- **CrowdSec IPS** mit Community-Threat-Intelligence
-- **GeoIP-Blocking** für unerwünschte Länder
-- **SSH-Härtung** mit Key-Only-Auth und Brute-Force-Schutz
+### Security
+- **NFTables Firewall** with dynamic rule management
+- **CrowdSec IPS** with community threat intelligence
+- **GeoIP Blocking** for unwanted countries
+- **SSH Hardening** with key-only auth and brute-force protection
 - **AppArmor** Mandatory Access Control
-- **AIDE & RKHunter** für Integritätsprüfung
-- **Kernel-Härtung** via sysctl
+- **AIDE & RKHunter** for integrity checking
+- **Kernel Hardening** via sysctl
 
 ### Automation
-- **Unattended-Upgrades** für automatische Sicherheitsupdates
-- **Automatische Backup-Strategie** vor kritischen Änderungen
-- **Self-Healing APT** repariert defekte Paketquellen
-- **Provider-Detection** erkennt VPS-Anbieter automatisch
+- **Unattended-Upgrades** for automatic security updates
+- **Automatic Backup Strategy** before critical changes
+- **Self-Healing APT** repairs broken package sources
+- **Provider Detection** automatically recognizes VPS providers
 
 ### Container & Services
-- **Docker Engine** mit sicherer Konfiguration
-- **Portainer CE** für Container-Management
-- **Watchtower** für automatische Container-Updates
-- **Tailscale VPN** Integration
+- **Docker Engine** with secure configuration
+- **Portainer CE** for container management
+- **Watchtower** for automatic container updates
+- **Tailscale VPN** integration
 
-## 📜 Versionshistorie & Änderungen
+## 📜 Version History & Changes
 
-Alle detaillierten Änderungen für jede Version, inklusive neuer Features und Bugfixes, werden sorgfältig im [**CHANGELOG.md**](CHANGELOG.md) dokumentiert.
+All detailed changes for each version, including new features and bugfixes, are carefully documented in the [**CHANGELOG.md**](CHANGELOG.md).
 
-## 📋 Systemanforderungen
+## 📋 System Requirements
 
-### Unterstützte Betriebssysteme
+### Supported Operating Systems
 | OS | Version | Status |
 |-----|---------|---------|
-| Debian | 13 (Trixie) | ✅ Vollständig getestet |
-| Debian | 12 (Bookworm) | ✅ Vollständig getestet |
-| Debian | 11 (Bullseye) | ⚠️ Sollte funktionieren |
-| Ubuntu | 22.04/24.04 | ⚠️ Ungetestet |
+| Debian | 13 (Trixie) | ✅ Fully tested |
+| Debian | 12 (Bookworm) | ✅ Fully tested |
+| Debian | 11 (Bullseye) | ⚠️ Should work |
+| Ubuntu | 22.04/24.04 | ⚠️ Untested |
 
-### Getestete VPS-Provider
-| Provider | Status | Bemerkungen |
+### Tested VPS Providers
+| Provider | Status | Notes |
 |----------|--------|-------------|
-| IONOS | ✅ Getestet | Mirror-Listen werden automatisch repariert |
-| Andere | ⚠️ Ungetestet | Theoretische Unterstützung vorhanden |
+| IONOS | ✅ Tested | Mirror lists are automatically repaired |
+| Others | ⚠️ Untested | Theoretical support available |
 
-### Mindestanforderungen
+### Minimum Requirements
 - 2 GB RAM
-- 10 GB Festplatte
-- Root-Zugriff
-- Internetverbindung
+- 10 GB disk space
+- Root access
+- Internet connection
 
 ## 🚀 Installation
 
-### Schnellstart
+### Quick Start
 
 ```bash
-# 1. Als root einloggen
+# 1. Login as root
 sudo -i
 
-# 2. Arbeitsverzeichnis erstellen
+# 2. Create working directory
 mkdir -p /opt/scripts && cd /opt/scripts
 
-# 3. Repository klonen
+# 3. Clone repository
 git clone https://github.com/TZERO78/Server-Baukasten.git
 cd Server-Baukasten
 
-# 4. Konfiguration anpassen
-cp standard.conf mein-server.conf
-nano mein-server.conf
+# 4. Customize configuration
+cp standard.conf my-server.conf
+nano my-server.conf
 
-# 5. Installation starten
-./serverbaukasten.sh -c mein-server.conf
+# 5. Start installation
+./serverbaukasten.sh -c my-server.conf
 ```
 
-### Alternative: Direktinstallation via curl
+### Alternative: Direct Installation via curl
 
 ```bash
 mkdir -p /opt/scripts && cd /opt/scripts
 curl -fsSL https://raw.githubusercontent.com/TZERO78/Server-Baukasten/main/install.sh | bash
 cd server-baukasten
-cp standard.conf mein-server.conf
-nano mein-server.conf
-./serverbaukasten.sh -c mein-server.conf
+cp standard.conf my-server.conf
+nano my-server.conf
+./serverbaukasten.sh -c my-server.conf
 ```
 
-## ⚙️ Konfiguration
+## ⚙️ Configuration
 
-### Wichtige Konfigurations-Parameter
+### Important Configuration Parameters
 
 ```bash
-# Basis-Einstellungen
-SERVER_HOSTNAME="mein-server"
+# Basic settings
+SERVER_HOSTNAME="my-server"
 ADMIN_USER="administrator"
 TIMEZONE="Europe/Berlin"
 LOCALE="de_DE.UTF-8"
 
-# Sicherheit
-SSH_PORT="6262"  # Non-Standard SSH Port
+# Security
+SSH_PORT="6262"  # Non-standard SSH port
 ACCESS_MODEL="1"  # 1=VPN-Only, 2=Public
 ENABLE_GEOIP_BLOCKING="ja"
 BLOCKED_COUNTRIES="CN RU KP IR"
 HOME_COUNTRY="DE"
 
 # Services
-SERVER_ROLE="1"  # 1=Docker-Server, 2=Einfacher Server
+SERVER_ROLE="1"  # 1=Docker server, 2=Simple server
 INSTALL_PORTAINER="ja"
 INSTALL_WATCHTOWER="ja"
 
 # Tailscale VPN (optional)
-TAILSCALE_AUTH_KEY=""  # Aus Tailscale Admin Console
+TAILSCALE_AUTH_KEY=""  # From Tailscale Admin Console
 ```
 
-[Vollständige Konfigurations-Dokumentation](docs/CONFIGURATION.md)
+[Complete Configuration Documentation](docs/en/CONFIGURATION.md)
 
-## 📊 Module
+## 📊 Modules
 
-Das Skript ist modular aufgebaut. Zu jedem Modul gibt es (oder folgt) eine eigene README unter `docs/modules/`.
+The script is modular. Each module has (or will have) its own README under `docs/en/modules/`.
 
-| Modul | Beschreibung | Doku |
+| Module | Description | Docs |
 |---|---|---|
-| `module_base` | System-Grundkonfiguration (NTP, Locale, User, Basics) | [docs/modules/base.md](docs/modules/base.md) |
-| `module_security` | Firewall (nftables), SSH-Härtung, CrowdSec | [docs/modules/security.md](docs/modules/security.md) |
-| `module_network` | Netzwerk & VPN (z. B. WireGuard) | [docs/modules/network.md](docs/modules/network.md) |
-| `module_container` | Docker/Moby installieren & Basis-Setup | [docs/modules/container.md](docs/modules/container.md) |
-| `module_deploy_containers` | Container-Stacks deployen (Compose etc.) | [docs/modules/deploy_containers.md](docs/modules/deploy_containers.md) |
-| `module_geoip` | Länderbasiertes Blocking (GeoIP-Sets) | [docs/modules/geoip.md](docs/modules/geoip.md) |
-| `module_install_services` | Basis-Dienste/Tools installieren | [docs/modules/install_services.md](docs/modules/install_services.md) |
-| `module_journald_optimization` | journald persistent + Limits/Rotation | [docs/modules/journald_optimization.md](docs/modules/journald_optimization.md) |
-| `module_kernel_hardening` | Kernel/Sysctl-Härtung | [docs/modules/kernel_hardening.md](docs/modules/kernel_hardening.md) |
-| `module_mail_setup` | Systemweite Mail via msmtp | [docs/modules/mail_setup.md](docs/modules/mail_setup.md) |
-| `module_prepare_install` | Vorbereitungen (Repos, Keys, Checks) | [docs/modules/prepare_install.md](docs/modules/prepare_install.md) |
-| `module_cleanup` | Aufräumen von Altlasten/Paketen | [docs/modules/cleanup.md](docs/modules/cleanup.md) |
-| `module_system_update` | Unattended-Upgrades, 1-Job-Flow, Reboot | [docs/modules/system_update.md](docs/modules/system_update.md) |
-| `module_verify_setup` | Finale Überprüfung/System-Checks | [docs/modules/verify_setup.md](docs/modules/verify_setup.md) |
+| `module_base` | System basic configuration (NTP, locale, user, basics) | [docs/en/modules/base.md](docs/en/modules/base.md) |
+| `module_security` | Firewall (nftables), SSH hardening, CrowdSec | [docs/en/modules/security.md](docs/en/modules/security.md) |
+| `module_network` | Network & VPN (e.g., WireGuard) | [docs/en/modules/network.md](docs/en/modules/network.md) |
+| `module_container` | Install Docker/Moby & basic setup | [docs/en/modules/container.md](docs/en/modules/container.md) |
+| `module_deploy_containers` | Deploy container stacks (Compose etc.) | [docs/en/modules/deploy_containers.md](docs/en/modules/deploy_containers.md) |
+| `module_geoip` | Country-based blocking (GeoIP sets) | [docs/en/modules/geoip.md](docs/en/modules/geoip.md) |
+| `module_install_services` | Install basic services/tools | [docs/en/modules/install_services.md](docs/en/modules/install_services.md) |
+| `module_journald_optimization` | journald persistent + limits/rotation | [docs/en/modules/journald_optimization.md](docs/en/modules/journald_optimization.md) |
+| `module_kernel_hardening` | Kernel/sysctl hardening | [docs/en/modules/kernel_hardening.md](docs/en/modules/kernel_hardening.md) |
+| `module_mail_setup` | System-wide mail via msmtp | [docs/en/modules/mail_setup.md](docs/en/modules/mail_setup.md) |
+| `module_prepare_install` | Preparations (repos, keys, checks) | [docs/en/modules/prepare_install.md](docs/en/modules/prepare_install.md) |
+| `module_cleanup` | Clean up legacy/packages | [docs/en/modules/cleanup.md](docs/en/modules/cleanup.md) |
+| `module_system_update` | Template-based unattended-upgrades (Debian 12/13) | [docs/en/modules/system_update.md](docs/en/modules/system_update.md) |
+| `module_verify_setup` | Final verification/system checks | [docs/en/modules/verify_setup.md](docs/en/modules/verify_setup.md) |
 
-## 🛠️ Verwendung
+## 🛠️ Usage
 
-### Basis-Befehle
+### Basic Commands
 
 ```bash
-# Normal-Installation
+# Normal installation
 ./serverbaukasten.sh -c config.conf
 
-# Debug-Modus
+# Debug mode
 ./serverbaukasten.sh -d -c config.conf
 
-# Test-Modus (schnell, ohne zeitintensive Operationen)
+# Test mode (fast, without time-intensive operations)
 ./serverbaukasten.sh -t -c config.conf
 
-# Hilfe anzeigen
+# Show help
 ./serverbaukasten.sh -h
 ```
 
-### Nach der Installation
+### After Installation
 
 ```bash
-# Status prüfen
+# Check status
 sudo systemctl status
 
-# Firewall-Regeln anzeigen
+# Display firewall rules
 sudo nft list ruleset
 
-# CrowdSec Status
+# CrowdSec status
 sudo cscli metrics
 
-# GeoIP-Manager
+# GeoIP manager
 sudo geoip-manager status
 
-# Docker Status (falls installiert)
+# Docker status (if installed)
 sudo docker ps
 ```
 
-## 🔒 Sicherheitskonzept
+## 🔒 Security Concept
 
 ### Defense in Depth
-Das Script implementiert mehrere Sicherheitsebenen:
+The script implements multiple security layers:
 
-1. **Perimeter-Schutz**: GeoIP-Blocking, Rate-Limiting
-2. **Netzwerk-Sicherheit**: NFTables Firewall, VPN-Only Access Option
-3. **Angriffserkennung**: CrowdSec IPS mit Community Threat-Intelligence  
-4. **System-Härtung**: SSH-Härtung, Kernel-Parameter (soweit auf VPS möglich)
+1. **Perimeter Protection**: GeoIP blocking, rate limiting
+2. **Network Security**: NFTables firewall, VPN-only access option
+3. **Attack Detection**: CrowdSec IPS with community threat intelligence
+4. **System Hardening**: SSH hardening, kernel parameters (as far as possible on VPS)
 5. **Monitoring**: AIDE, RKHunter, systemd-journald
 
-### Automatische Updates
-- Sicherheitsupdates via unattended-upgrades
-- Container-Updates via Watchtower (optional)
-- CrowdSec Threat-Intelligence Updates
+### Automatic Updates
+- Security updates via unattended-upgrades
+- Container updates via Watchtower (optional)
+- CrowdSec threat intelligence updates
 
-**Hinweis**: E-Mail-Benachrichtigungen sind konfigurierbar aber optional.
+**Note**: Email notifications are configurable but optional.
 
-## 📝 Wartung
+## 📝 Maintenance
 
-### Logs prüfen
+### Check Logs
 ```bash
-# System-Logs
+# System logs
 journalctl -xe
 
-# CrowdSec Logs
+# CrowdSec logs
 journalctl -u crowdsec
 
-# Docker Logs
+# Docker logs
 docker logs <container>
 ```
 
 ### Backup
-Das Skript erstellt vereinzelt Backups vor kritischen Änderungen:
-- APT sources.list (vor Reparatur)
-- Andere System-Dateien bei Bedarf
+The script occasionally creates backups before critical changes:
+- APT sources.list (before repair)
+- Other system files as needed
 
-**⚠️ Sicherheitshinweis**: Config-Dateien werden NICHT gesichert, da sie Passwörter im Klartext enthalten! Bewahre deine Config-Datei sicher und verschlüsselt auf.
+**⚠️ Security Note**: Config files are NOT backed up because they contain passwords in plain text! Keep your config file safe and encrypted.
 
-**Wichtig**: Mache vor der Installation ein manuelles System-Backup!
+**Important**: Make a manual system backup before installation!
 
-## 🐛 Fehlerbehebung
+## 🐛 Troubleshooting
 
-### APT-Probleme
-Werden automatisch erkannt und repariert (v5.2+)
+### APT Problems
+Automatically detected and repaired (v5.2+)
 
-### SSH-Zugang verloren
-1. VPS-Provider Konsole nutzen
-2. Firewall temporär deaktivieren: `nft flush ruleset`
-3. SSH-Port prüfen: `grep Port /etc/ssh/sshd_config`
+### SSH Access Lost
+1. Use VPS provider console
+2. Temporarily disable firewall: `nft flush ruleset`
+3. Check SSH port: `grep Port /etc/ssh/sshd_config`
 
-### Docker-Probleme
+### Docker Problems
 ```bash
 systemctl restart docker
-docker system prune -a  # Vorsicht: Löscht alle ungenutzten Daten
+docker system prune -a  # Caution: Deletes all unused data
 ```
 
-## 🤝 Beitragen
+## 🤝 Contributing
 
-Contributions sind willkommen!
+Contributions are welcome!
 
-1. Fork das Repository
-2. Erstelle einen Feature Branch
-3. Committe deine Änderungen
-4. Push zum Branch
-5. Öffne einen Pull Request
+1. Fork the repository
+2. Create a feature branch
+3. Commit your changes
+4. Push to the branch
+5. Open a pull request
 
-### Testen auf anderen Providern
+### Testing on Other Providers
 
-Besonders gesucht: Tests auf
+Especially wanted: Tests on
 - Hetzner
 - DigitalOcean
 - AWS/Azure
-- Anderen Debian/Ubuntu Versionen
+- Other Debian/Ubuntu versions
 
-Bitte öffne ein [Issue](https://github.com/TZERO78/Server-Baukasten/issues) mit deinen Erfahrungen.
+Please open an [Issue](https://github.com/TZERO78/Server-Baukasten/issues) with your experiences.
 
-## 📄 Lizenz
+## 📄 License
 
-Dieses Projekt steht unter der MIT-Lizenz - siehe [LICENSE](LICENSE) für Details.
+This project is licensed under the MIT License - see [LICENSE](LICENSE) for details.
 
-## 👥 Autoren
+## 👥 Authors
 
 - **Markus F. (TZERO78)** - *Initial work*
-- **KI-Assistenten** - *Code-Optimierung*
+- **AI Assistants** - *Code optimization*
 
-## 🙏 Danksagung
+## 🙏 Acknowledgments
 
-### Inspiration & Wissensquellen
-- **Christian** (ion.it/Apfelcast) für Linux-Security-Inspiration
-- **ct3003** für praktische Server-Tipps
-- **Dennis Schröder** (Raspberry Pi Cloud/ipv64.net) für Ideen und Aufklärung
-- **Geek Freaks** für Docker-Best-Practices
+### Inspiration & Knowledge Sources
+- **Christian** (ion.it/Apfelcast) for Linux security inspiration
+- **ct3003** for practical server tips
+- **Dennis Schröder** (Raspberry Pi Cloud/ipv64.net) for ideas and education
+- **Geek Freaks** for Docker best practices
 
-### Open-Source-Projekte
-- [CrowdSec](https://www.crowdsec.net/) für das Community-basierte IPS
-- [Tailscale](https://tailscale.com/) für das einfache Mesh-VPN
-- [NFTables](https://netfilter.org/projects/nftables/) für moderne Packet-Filterung
-- Die Debian/Linux Community
+### Open Source Projects
+- [CrowdSec](https://www.crowdsec.net/) for the community-based IPS
+- [Tailscale](https://tailscale.com/) for the simple mesh VPN
+- [NFTables](https://netfilter.org/projects/nftables/) for modern packet filtering
+- The Debian/Linux Community
 
-## ⚠️ Haftungsausschluss
+## ⚠️ Disclaimer
 
-Dieses Skript macht tiefgreifende Systemänderungen. 
-- **Immer vorher ein Backup machen**
-- **Erst in einer Test-Umgebung ausprobieren**
-- **Keine Garantie für Produktivsysteme**
+This script makes profound system changes.
+- **Always make a backup first**
+- **Try it in a test environment first**
+- **No guarantee for production systems**
 
-Der Autor übernimmt keine Haftung für Schäden oder Datenverlust.
+The author assumes no liability for damages or data loss.
 
 ## 📞 Support
 
-- [Issues](https://github.com/TZERO78/Server-Baukasten/issues) für Bug-Reports
-- [Discussions](https://github.com/TZERO78/Server-Baukasten/discussions) für Fragen
+- [Issues](https://github.com/TZERO78/Server-Baukasten/issues) for bug reports
+- [Discussions](https://github.com/TZERO78/Server-Baukasten/discussions) for questions
 
 ---
 
 <div align="center">
-  
-**[Dokumentation](docs/) | [Changelog](CHANGELOG.md) | [Konfiguration](docs/CONFIGURATION.md) | [Wiki](../../wiki)**
+
+**[Documentation](docs/en/) | [Changelog](CHANGELOG.md) | [Configuration](docs/en/CONFIGURATION.md) | [Wiki](../../wiki)**
+
+🇩🇪 [Deutsche Version](docs/de/README.md)
 
 Made with ❤️ in Germany
 

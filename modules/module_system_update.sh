@@ -14,6 +14,7 @@ module_system_update() {
 
     # ========================= Konfigurierbare Defaults =========================
     : "${UPGRADE_EXTENDED:=ja}"      # ja => +updates, nein => nur -security
+    : "${UPGRADE_BACKPORTS:=nein}"   # ja => +backports, nein => ohne
     : "${U_U_TIME:=03:30:00}"        # Startzeit für den nächtl. Job
     : "${REBOOT_ENABLE:=ja}"         # ja|nein
     : "${REBOOT_TIME:=03:45}"        # Reboot-Fenster (HH:MM)
@@ -24,6 +25,23 @@ module_system_update() {
     : "${PURGE_RC:=nein}"            # ja => rc-Pakete per dpkg -P entfernen
 
     log_info "🆙 MODUL: System Update & Automatisierung (via systemd)"
+
+    # ========================= Lokale Template-Rendering-Funktion =========================
+    _render_local_template() {
+        local template_name="$1" output_path="$2"
+        local template_file="templates/${template_name}"
+        
+        [ -f "$template_file" ] || { log_error "Template nicht gefunden: $template_file"; return 1; }
+        
+        # Export alle Variablen für envsubst
+        export BACKPORTS_LINE MAIL_BLOCK REBOOT_ENABLE REBOOT_TIME REBOOT_WITH_USERS U_U_TIME
+        
+        envsubst < "$template_file" > "$output_path" || { 
+            log_error "Template-Rendering fehlgeschlagen: $template_name"; 
+            return 1; 
+        }
+        log_debug "Template gerendert: $template_name → $output_path"
+    }
 
     # ================================ Pakete ===================================
     if [ "$TEST_MODE" = true ]; then
@@ -42,47 +60,43 @@ module_system_update() {
     # =================== 1/3: unattended-upgrades konfigurieren =================
     log_info "  -> 1/3: Konfiguriere unattended-upgrades…"
 
-    local allowed_origins='      "\${distro_id}:\${distro_codename}-security";
-      "\${distro_id}:stable-security";'
-    if [ "$UPGRADE_EXTENDED" = "ja" ]; then
-        allowed_origins="${allowed_origins}
-      \"\${distro_id}:\${distro_codename}-updates\";
-      \"\${distro_id}:stable-updates\";"
+    # ========== Variablen-Setup für Templates ==========
+    
+    # Backports-Zeile generieren (nur wenn gewünscht)
+    if [ "$UPGRADE_BACKPORTS" = "ja" ]; then
+        BACKPORTS_LINE="    \"\${distro_id}:\${distro_codename}-backports\";"
+    else
+        BACKPORTS_LINE=""
     fi
 
-    # Mail-Block nur, wenn global aktiviert und Ziel gesetzt (Mail-Modul kümmert sich)
-    local mail_block=""
+    # Mail-Block generieren (nur wenn global aktiviert und Ziel gesetzt)
     if [ "${ENABLE_SYSTEM_MAIL:-nein}" = "ja" ] && [ -n "${NOTIFICATION_EMAIL:-}" ]; then
-        mail_block=$(cat <<EOF_MB
-Unattended-Upgrade::Mail "${NOTIFICATION_EMAIL}";
-Unattended-Upgrade::MailOnlyOnError "false";
-Unattended-Upgrade::MailReport "on-change";
-EOF_MB
-)
+        MAIL_BLOCK="Unattended-Upgrade::Mail \"${NOTIFICATION_EMAIL}\";
+Unattended-Upgrade::MailOnlyOnError \"false\";
+Unattended-Upgrade::MailReport \"on-change\";
+"
+    else
+        MAIL_BLOCK=""
     fi
 
+    # Boolean-Konvertierung für systemd (ja → true, nein → false)
+    REBOOT_ENABLE=$( [ "$REBOOT_ENABLE" = "ja" ] && echo "true" || echo "false" )
+    REBOOT_WITH_USERS=$( [ "$REBOOT_WITH_USERS" = "ja" ] && echo "true" || echo "false" )
+
+    # ========== Template rendern ==========
     backup_and_register "/etc/apt/apt.conf.d/50unattended-upgrades"
-    cat > /etc/apt/apt.conf.d/50unattended-upgrades <<EOF
-// Server-Baukasten – unattended-upgrades (deterministisch, 1 Job)
-Unattended-Upgrade::Allowed-Origins {
-$allowed_origins
-};
-Unattended-Upgrade::Remove-Unused-Dependencies "true";
-${mail_block}Unattended-Upgrade::SyslogEnable "false";
-Unattended-Upgrade::Automatic-Reboot "$( [ "$REBOOT_ENABLE" = "ja" ] && echo true || echo false )";
-Unattended-Upgrade::Automatic-Reboot-Time "${REBOOT_TIME}";
-Unattended-Upgrade::Automatic-Reboot-WithUsers "$( [ "$REBOOT_WITH_USERS" = "ja" ] && echo true || echo false )";
-EOF
+    _render_local_template "50unattended-upgrades.template" "/etc/apt/apt.conf.d/50unattended-upgrades" || {
+        log_error "Fehler beim Rendern von 50unattended-upgrades.template"
+        return 1
+    }
 
     # ======== 2/3: APT Periodic deaktivieren (alles übernimmt unser Job) ========
     log_info "  -> 2/3: Deaktiviere APT-Periodic (ein Job reicht)…"
     backup_and_register "/etc/apt/apt.conf.d/20auto-upgrades"
-    cat > /etc/apt/apt.conf.d/20auto-upgrades <<'EOF'
-// APT Periodic – deaktiviert; Listen & Cleanup übernimmt unser Service
-APT::Periodic::Update-Package-Lists "0";
-APT::Periodic::AutocleanInterval "0";
-APT::Periodic::Unattended-Upgrade "0";
-EOF
+    _render_local_template "20auto-upgrades.template" "/etc/apt/apt.conf.d/20auto-upgrades" || {
+        log_error "Fehler beim Rendern von 20auto-upgrades.template"
+        return 1
+    }
 
     # ===== 3/3: Service & Timer (update → upgrade → cleanup, klar getaktet) =====
     log_info "  -> 3/3: Erzeuge Service & Timer…"
@@ -110,6 +124,8 @@ User=root
 Nice=10
 IOSchedulingClass=best-effort
 IOSchedulingPriority=7
+SuccessExitStatus=0 2
+TimeoutStartSec=1h
 EOF
 
     # Optionalen Extra-Cleanup anhängen (Deep-Clean / rc-Pakete purgen)
@@ -117,8 +133,7 @@ EOF
     [ "$CLEAN_DEEP" = "ja" ] && extra_cleanup+=$'\nExecStartPost=/usr/bin/apt-get -y clean'
     if [ "$PURGE_RC" = "ja" ]; then
         # rc-Pakete entfernen; robust (kein Fehler, wenn leer)
-        extra_cleanup+=$'\nExecStartPost=/bin/sh -c '\''
-dpkg -l | awk "/^rc/ {print \\$2}" | xargs -r dpkg -P'\'''
+        extra_cleanup+=$'\nExecStartPost=/bin/sh -c '\''dpkg -l | awk "/^rc/ {print \\$2}" | xargs -r dpkg -P'\'''
     fi
     [ -n "$extra_cleanup" ] && printf "%s\n" "$extra_cleanup" >> /etc/systemd/system/unattended-upgrades-run.service
 
@@ -135,6 +150,7 @@ Persistent=true
 WantedBy=timers.target
 EOF
 
+    # Deterministisches Override (exakte Zeit, kein Zufall)
     install -d /etc/systemd/system/unattended-upgrades-run.timer.d
     cat > /etc/systemd/system/unattended-upgrades-run.timer.d/override.conf <<EOF
 [Timer]
@@ -144,27 +160,28 @@ RandomizedDelaySec=0
 Persistent=true
 EOF
 
-    # Fremde apt-Timer NICHT erzeugen; falls vorhanden, nur sauber deaktivieren
-    if _unit_exists "apt-daily.timer"; then
-        log_info "     -> Deaktiviere vorhandenen apt-daily.timer (ein Job genügt)…"
-        systemctl disable --now apt-daily.timer 2>/dev/null || true
-    fi
-    if _unit_exists "apt-daily-upgrade.timer"; then
-        log_info "     -> Deaktiviere vorhandenen apt-daily-upgrade.timer (Doppel-Logik vermeiden)…"
-        systemctl disable --now apt-daily-upgrade.timer 2>/dev/null || true
-    fi
+    # ========== apt-Timer MASKIEREN (nicht nur disable, verhindert Reaktivierung) ==========
+    log_info "     -> Maskiere apt-Timer (Doppel-Logik vermeiden)…"
+    for timer_unit in apt-daily.timer apt-daily.service apt-daily-upgrade.timer apt-daily-upgrade.service; do
+        if _unit_exists "$timer_unit"; then
+            systemctl disable --now "$timer_unit" 2>/dev/null || true
+            systemctl mask "$timer_unit" 2>/dev/null || true
+            log_debug "       Maskiert: $timer_unit"
+        fi
+    done
 
-    # Aktivieren
+    # Aktivieren unseres Jobs
     systemctl daemon-reload
     systemctl enable --now unattended-upgrades-run.timer
-    systemctl restart unattended-upgrades-run.timer || true
+    systemctl restart unattended-upgrades-run.timer 2>/dev/null || true
 
     log_ok "Automatisches Update-Setup abgeschlossen (1 Job + Reboot)."
-    log_info "⏱  Upgrades: ${U_U_TIME}  |  Reboot: $( [ "$REBOOT_ENABLE" = "ja" ] && echo "${REBOOT_TIME}" || echo "aus")"
+    log_info "⏱  Upgrades: ${U_U_TIME}  |  Reboot: $( [ "$REBOOT_ENABLE" = "true" ] && echo "${REBOOT_TIME}" || echo "aus" )"
     if [ "${ENABLE_SYSTEM_MAIL:-nein}" = "ja" ] && [ -n "${NOTIFICATION_EMAIL:-}" ]; then
         log_info "📧 Mail-Report: on-change → ${NOTIFICATION_EMAIL}"
     else
         log_info "📧 Mail-Report: deaktiviert (ENABLE_SYSTEM_MAIL!=ja oder NOTIFICATION_EMAIL leer)"
     fi
     log_info "📜 Logs: journalctl -u unattended-upgrades-run.service"
+    log_info "📜 Timer: systemctl list-timers unattended-upgrades-run.timer"
 }

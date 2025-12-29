@@ -253,7 +253,7 @@ rollback() {
 
 download_and_process_template() {
     local template_name="$1" dest_path="$2" permissions="$3" owner="$4"
-    local source_url="${CONF_BASE_URL}/${template_name}"
+    local source_url="${TEMPLATES_BASE_URL}/${template_name}"
     local temp_file; temp_file=$(mktemp)
 
     if ! run_with_spinner "Lade Vorlage '$template_name'..." "curl -fsSL '$source_url' -o '$temp_file'"; then

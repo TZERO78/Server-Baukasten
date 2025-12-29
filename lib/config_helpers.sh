@@ -166,20 +166,27 @@ validate_config() {
 
   log_info "🔍 Validiere Konfigurationsvariablen..."
 
-  # Validierungsregeln: "VARIABLE|VALIDATOR|FEHLERMELDUNG|BEDINGUNG"
-  local validations=(
-    # Grundkonfiguration
-    "SERVER_HOSTNAME|is_valid_hostname|Ungültiger Hostname.|"
-    "ADMIN_USER|is_valid_username|Ungültiger Benutzername (nur a-z, 0-9, _, -).|"
-    "ADMIN_PASSWORD|:|Admin-Passwort darf nicht leer sein.|"
-    "ROOT_PASSWORD|:|Root-Passwort darf nicht leer sein.|"
-    "NOTIFICATION_EMAIL|is_valid_email|Ungültiges E-Mail-Format.|"
-    "ACCESS_MODEL|is_choice_1_2|Zugriffsmodell muss 1 (VPN) oder 2 (Öffentlich) sein.|"
-    "SSH_PORT|is_valid_port|SSH-Port muss zwischen 1025 und 65535 liegen.|"
-    "SERVER_ROLE|is_choice_1_2|Server-Rolle muss 1 (Docker) oder 2 (Einfach) sein.|"
-    "TIMEZONE|is_valid_timezone|Zeitzone ist ungültig.|"
-    "LOCALE|:|Locale darf nicht leer sein.|"
-    "UPGRADE_EXTENDED|is_yes_no|UPGRADE_EXTENDED muss 'ja' oder 'nein' sein.|"
+    # Validierungsregeln: "VARIABLE|VALIDATOR|FEHLERMELDUNG|BEDINGUNG"
+    local validations=(
+        # Grundkonfiguration
+        "SERVER_HOSTNAME|is_valid_hostname|Ungültiger Hostname.|"
+        "ADMIN_USER|is_valid_username|Ungültiger Benutzername (nur a-z, 0-9, _, -).|"
+        "ADMIN_PASSWORD|:|Admin-Passwort darf nicht leer sein.|"
+        "ROOT_PASSWORD|:|Root-Passwort darf nicht leer sein.|"
+        "NOTIFICATION_EMAIL|is_valid_email|Ungültiges E-Mail-Format.|"
+        "ACCESS_MODEL|is_choice_1_2|Zugriffsmodell muss 1 (VPN) oder 2 (Öffentlich) sein.|"
+        "SSH_PORT|is_valid_port|SSH-Port muss zwischen 1025 und 65535 liegen.|"
+        "SERVER_ROLE|is_choice_1_2|Server-Rolle muss 1 (Docker) oder 2 (Einfach) sein.|"
+        "TIMEZONE|is_valid_timezone|Zeitzone ist ungültig.|"
+        "LOCALE|:|Locale darf nicht leer sein.|"
+        
+        # System-Updates & Automatisierung
+        "UPGRADE_EXTENDED|is_yes_no|UPGRADE_EXTENDED muss 'ja' oder 'nein' sein.|"
+        "UPGRADE_BACKPORTS|is_yes_no|UPGRADE_BACKPORTS muss 'ja' oder 'nein' sein.|"
+        "U_U_TIME|is_valid_time|U_U_TIME muss Format HH:MM:SS haben (z.B. 03:30:00).|"
+        "REBOOT_ENABLE|is_yes_no|REBOOT_ENABLE muss 'ja' oder 'nein' sein.|"
+        "REBOOT_TIME|is_valid_time_hhmm|REBOOT_TIME muss Format HH:MM haben (z.B. 03:45).|"
+        "REBOOT_WITH_USERS|is_yes_no|REBOOT_WITH_USERS muss 'ja' oder 'nein' sein.|"
 
     # CrowdSec
     "CROWDSEC_MAXRETRY|is_numeric|CROWDSEC_MAXRETRY muss eine Zahl sein.|"
@@ -268,7 +275,12 @@ load_config_from_file() {
   # Schritt 3: Defaults & Secrets & Kanonisierung vor Validate
   # Defaults
   ENABLE_SYSTEM_MAIL="${ENABLE_SYSTEM_MAIL:-nein}"
-  UPGRADE_EXTENDED="${UPGRADE_EXTENDED:-nein}"
+  UPGRADE_EXTENDED="${UPGRADE_EXTENDED:-ja}"
+  UPGRADE_BACKPORTS="${UPGRADE_BACKPORTS:-nein}"
+  U_U_TIME="${U_U_TIME:-03:30:00}"
+  REBOOT_ENABLE="${REBOOT_ENABLE:-ja}"
+  REBOOT_TIME="${REBOOT_TIME:-03:45}"
+  REBOOT_WITH_USERS="${REBOOT_WITH_USERS:-ja}"
   INSTALL_PORTAINER="${INSTALL_PORTAINER:-nein}"
   INSTALL_WATCHTOWER="${INSTALL_WATCHTOWER:-nein}"
 

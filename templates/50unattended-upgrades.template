@@ -1,0 +1,13 @@
+// Server-Baukasten – unattended-upgrades (deterministisch, 1 Job)
+// Gilt für Debian 12/13 dank ${distro_*} Platzhaltern
+Unattended-Upgrade::Allowed-Origins {
+    "${distro_id}:${distro_codename}-security";
+    "${distro_id}:${distro_codename}-updates";
+${BACKPORTS_LINE}
+};
+Unattended-Upgrade::AutoFixInterruptedDpkg "true";
+Unattended-Upgrade::Remove-Unused-Dependencies "true";
+${MAIL_BLOCK}Unattended-Upgrade::SyslogEnable "false";
+Unattended-Upgrade::Automatic-Reboot "${REBOOT_ENABLE}";
+Unattended-Upgrade::Automatic-Reboot-Time "${REBOOT_TIME}";
+Unattended-Upgrade::Automatic-Reboot-WithUsers "${REBOOT_WITH_USERS}";
